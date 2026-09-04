@@ -155,6 +155,7 @@ def train_transformer(
     fine_tune: bool = False,
     epochs: int | None = None,
     limit: int | None = None,
+    lift_only: bool = False,
 ) -> None:
     number_of_epochs = 35
     if smoke_test:
@@ -261,6 +262,17 @@ def train_transformer(
         model.freeze_encoder()
         model.freeze_decoder()
         model.unfreeze_lift_decoder()
+        if lift_only:
+            eprint("Training the lift branch only")
+        else:
+            # The makam key signature and the usul are rhythm tokens, so the
+            # rhythm branch has to learn too. Pass --lift-only for the safer,
+            # narrower run that cannot disturb how symbols are read at all.
+            model.unfreeze_rhythm_decoder()
+            eprint("Training the lift and rhythm branches")
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in model.parameters())
+        eprint(f"Trainable parameters: {trainable:,} of {total:,}")
     else:
         model = TrOMR(config)
 
@@ -310,6 +322,11 @@ if __name__ == "__main__":
         default=None,
         help="Use only the first N staff samples. For a quick end-to-end check.",
     )
+    parser.add_argument(
+        "--lift-only",
+        action="store_true",
+        help="Train only the accidental branch, leaving rhythm reading untouched.",
+    )
     options = parser.parse_args()
     if options.fine:
         train_transformer(
@@ -318,6 +335,7 @@ if __name__ == "__main__":
             fine_tune=True,
             epochs=options.epochs,
             limit=options.limit,
+            lift_only=options.lift_only,
         )
     else:
         train_transformer(smoke_test=True)

@@ -83,6 +83,19 @@ class TrOMR(nn.Module):
         for param in self.decoder.net.to_logits_lift.parameters():
             param.requires_grad = True
 
+    def unfreeze_rhythm_decoder(self) -> None:
+        """Also train the rhythm branch.
+
+        Needed for the makam tokens that are not accidentals: the key signature
+        arrives as keyAccidental symbols and the usul as timeSignature_N/D, both
+        of which are rhythm tokens. With the branch frozen the model can never
+        emit either, however well it learns the accidental glyphs themselves.
+        """
+        for param in self.decoder.net.rhythm_emb.parameters():
+            param.requires_grad = True
+        for param in self.decoder.net.to_logits_rhythm.parameters():
+            param.requires_grad = True
+
 
 def _grow_to_fit_vocabulary(
     model: TrOMR, state: dict[str, torch.Tensor]
