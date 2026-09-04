@@ -1,5 +1,6 @@
 import glob
 import math
+import re
 from xml.dom import minidom
 
 from homr import constants
@@ -256,11 +257,20 @@ def _extend_staffs_with_stems(staffs: list[SvgStaff], stems: list[SvgRectangle])
             best_staff.extend_y_range(stem.y + stem.height)
 
 
+def _parse_svg_length(value: str) -> float:
+    # Different MuseScore versions annotate the SVG size with a unit suffix
+    # ("1000px" in 4.2, "215.9mm" in 4.7), so read the leading number only.
+    match = re.match(r"[-+]?\d*\.?\d+", value.strip())
+    if match is None:
+        raise SvgValidationError(f"Cannot parse SVG length '{value}'")
+    return float(match.group())
+
+
 def get_position_information_from_svg(svg_file: str) -> SvgMusicFile:
     doc = minidom.parse(svg_file)  # noqa: S318
     svg_element = doc.getElementsByTagName("svg")[0]
-    width = float(svg_element.getAttribute("width").replace("px", ""))
-    height = float(svg_element.getAttribute("height").replace("px", ""))
+    width = _parse_svg_length(svg_element.getAttribute("width"))
+    height = _parse_svg_length(svg_element.getAttribute("height"))
     lines = doc.getElementsByTagName("polyline")
     staff_lines: list[SvgRectangle] = []
     bar_lines: list[SvgRectangle] = []

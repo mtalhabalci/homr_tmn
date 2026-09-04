@@ -1,3 +1,4 @@
+import argparse
 import os
 import shutil
 import sys
@@ -13,6 +14,7 @@ from transformers import (
     TrainingArguments,
 )
 
+from homr import download_utils
 from homr.simple_logging import eprint
 from homr.transformer.configs import Config
 from training.architecture.transformer.tromr_arch import TrOMR, load_model
@@ -22,6 +24,11 @@ from training.datasets.convert_grandstaff import (
 )
 from training.datasets.convert_lieder import convert_lieder, lieder_train_index
 from training.datasets.convert_primus import convert_primus_dataset, primus_train_index
+from training.datasets.convert_symbtr import (
+    convert_symbtr,
+    symbtr_train_index,
+    symbtr_val_index,
+)
 from training.run_id import get_run_id
 from training.transformer.data_loader import label_names, load_dataset
 from training.transformer.metrics import HomrTrainer
@@ -57,6 +64,33 @@ class FreezeCallback(TrainerCallback):
             eprint(f"Unfreezing backbone at epoch {state.epoch}")
             model.unfreeze_backbone()
             self._backbone_frozen = False
+
+
+def download_training_checkpoint(config: Config) -> None:
+    """Fetch the PyTorch weights fine-tuning starts from.
+
+    homr.main downloads the ONNX models used for inference; the .pth the trainer
+    needs lives in a different release and nothing fetched it, which made a fresh
+    machine (a Colab runtime, say) unable to fine-tune at all.
+    """
+    checkpoint = config.filepaths.checkpoint
+    if os.path.exists(checkpoint):
+        return
+    base_url = "https://github.com/liebharc/homr/releases/download/checkpoints/"
+    name = os.path.basename(checkpoint).removesuffix(".pth")
+    destination = os.path.dirname(checkpoint)
+    os.makedirs(destination, exist_ok=True)
+    archive = os.path.join(destination, name + ".zip")
+    eprint(f"Downloading training checkpoint {name} - this is only required once")
+    try:
+        download_utils.download_file(base_url + name + ".zip", archive)
+        download_utils.unzip_file(archive, destination)
+    finally:
+        if os.path.exists(archive):
+            os.remove(archive)
+    if not os.path.exists(checkpoint):
+        eprint(f"Checkpoint still missing after download: {checkpoint}")
+        sys.exit(1)
 
 
 def load_training_index(file_path: str) -> list[str]:
@@ -108,18 +142,29 @@ def _check_datasets_are_present(selected_datasets: list[str]) -> list[str]:
 
         if dataset == lieder_train_index and not os.path.exists(lieder_train_index):
             convert_lieder()
+
+        if dataset == symbtr_train_index and not os.path.exists(symbtr_train_index):
+            convert_symbtr()
     return selected_datasets
 
 
 def train_transformer(
-    fp32: bool = False, resume: str = "", smoke_test: bool = False, fine_tune: bool = False
+    fp32: bool = False,
+    resume: str = "",
+    smoke_test: bool = False,
+    fine_tune: bool = False,
+    epochs: int | None = None,
+    limit: int | None = None,
 ) -> None:
     number_of_epochs = 35
     if smoke_test:
         number_of_epochs = 10
     elif fine_tune:
         number_of_epochs = 15
+    if epochs is not None:
+        number_of_epochs = epochs
     resume_from_checkpoint = None
+    validation_index: list[str] | None = None
 
     checkpoint_folder = "current_training"
     if resume:
@@ -136,6 +181,22 @@ def train_transformer(
             [1.0, 1.0, 1.0],
             number_of_files,
         )
+    elif fine_tune:
+        # Makam fine-tuning runs on SymbTr alone. The two repertoires disagree
+        # about what the ordinary sharp glyph means - a semitone in Western
+        # notation, four commas in makam - so mixing them would teach the lift
+        # head two labels for one picture.
+        number_of_files = -1
+        train_index = load_and_mix_training_sets(
+            _check_datasets_are_present([symbtr_train_index]), [1.0], number_of_files
+        )
+        # SymbTr is split by work up front, so use that split rather than
+        # slicing the shuffled, oversampled training list.
+        validation_index = load_training_index(symbtr_val_index)
+        if limit is not None:
+            # A short end-to-end check: a slice of both sides, not a real run.
+            train_index = train_index[:limit]
+            validation_index = validation_index[: max(1, limit // 10)]
     else:
         number_of_files = -1
         train_index = load_and_mix_training_sets(
@@ -147,12 +208,18 @@ def train_transformer(
         )
 
     config = Config()
-    datasets = load_dataset(train_index, config, val_split=0.1)
+    datasets = load_dataset(
+        train_index, config, val_split=0.1, validation_samples=validation_index
+    )
 
     compile_threshold = 50000
     compile_model = (
         number_of_files < 0 or number_of_files * number_of_epochs >= compile_threshold
     )  # Compiling needs time, but pays off for large datasets
+    if limit is not None:
+        # A limited run exists to prove the pipeline turns over. Compiling would
+        # spend several minutes warming up and swamp the run it is meant to check.
+        compile_model = False
     if compile_model:
         eprint("Compiling model")
 
@@ -182,11 +249,14 @@ def train_transformer(
         label_names=label_names,
         bf16=not fp32,
         dataloader_pin_memory=True,
-        dataloader_num_workers=12,
+        # Colab runtimes vary from 2 to 12 vCPUs; asking for more workers than
+        # there are cores starves the loaders instead of filling the GPU.
+        dataloader_num_workers=min(12, max(2, (os.cpu_count() or 4) - 2)),
     )
 
     if fine_tune:
         eprint("Fine tuning model from", config.filepaths.checkpoint)
+        download_training_checkpoint(config)
         model = load_model(config)
         model.freeze_encoder()
         model.freeze_decoder()
@@ -225,9 +295,29 @@ def train_transformer(
 
 
 if __name__ == "__main__":
-    if "--fine" in sys.argv:
-        train_transformer(fp32=False, fine_tune=True)
-    elif len(sys.argv) > 1:
-        raise ValueError("Unknown argument")
+    parser = argparse.ArgumentParser(description="Train the transformer")
+    parser.add_argument(
+        "--fine", action="store_true", help="Fine-tune the makam accidentals on SymbTr."
+    )
+    parser.add_argument("--fp32", action="store_true", help="Train in fp32 instead of bf16.")
+    parser.add_argument("--resume", type=str, default="", help="Checkpoint folder to resume from.")
+    parser.add_argument(
+        "--epochs", type=int, default=None, help="Override the number of epochs."
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Use only the first N staff samples. For a quick end-to-end check.",
+    )
+    options = parser.parse_args()
+    if options.fine:
+        train_transformer(
+            fp32=options.fp32,
+            resume=options.resume,
+            fine_tune=True,
+            epochs=options.epochs,
+            limit=options.limit,
+        )
     else:
         train_transformer(smoke_test=True)

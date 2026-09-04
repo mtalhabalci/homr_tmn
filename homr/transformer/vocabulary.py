@@ -10,6 +10,34 @@ from homr.simple_logging import eprint
 nonote = "."
 empty = "_"  # used for decorations on note, if there is no decoration
 
+# Turkish makam accidentals, named by how many Holderian commas they raise or
+# lower the note. A whole tone is 9 commas.
+#
+# We deliberately do NOT reuse the MusicXML accidental names here. Printed Mus2
+# scores use ten distinct glyphs, and four of them (the 2- and 3-comma sharps and
+# flats, drawn as the nearest AEU sign with a small digit above it) have no
+# MusicXML name at all. Naming by comma count keeps the alphabet symmetric and
+# complete; the translation to MusicXML happens on export, see
+# homr/music_xml_generator.py LIFT_TO_ACCIDENTAL.
+#
+#   1 comma = koma            4 commas = bakiye
+#   5 commas = küçük mücenneb  8 commas = büyük mücenneb
+# The 2- and 3-comma steps are outside the AEU set but do occur in print.
+aeu_commas = [1, 2, 3, 4, 5, 8]
+aeu_accidentals = [f"sharp{c}" for c in aeu_commas] + [f"flat{c}" for c in aeu_commas]
+
+# Rhythm token that carries a key-signature accidental. One is emitted per
+# accidental in the signature, and unlike the Western keySignature_N token it
+# carries a pitch and a lift, so any makam signature can be spelled out from
+# parts the model already knows. See has_rhythm_symbol_a_position.
+key_accidental = "keyAccidental"
+
+# Turkish usuls use meters the Western keySignature/timeSignature pair cannot
+# express: the existing timeSignature/N token records only the beat type, so 9/8
+# and 12/8 collapse onto the same token. These spell out both numbers.
+_time_numerators = [*range(1, 17), 18, 20, 24, 28, 32]
+_time_denominators = [2, 4, 8, 16]
+
 
 def build_dict(tokens: Iterable[str]) -> dict[str, int]:
     result = {}
@@ -69,6 +97,12 @@ def build_rhythm() -> dict[str, int]:
     # Note relations (https://en.wikipedia.org/wiki/List_of_musical_symbols)
     rhythm.extend(["tieSlur"])  #  "gliss"
 
+    # Makam additions, appended last so every index above keeps its value.
+    rhythm.append(key_accidental)
+    rhythm.extend(
+        f"timeSignature_{n}/{d}" for n in _time_numerators for d in _time_denominators
+    )
+
     # Dynamics
     # rhythm.extend(
     #    [f"dynamic_{d}" for d in ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "sfz", "fp"]]
@@ -86,7 +120,9 @@ def build_rhythm() -> dict[str, int]:
 
 
 def build_lift() -> dict[str, int]:
-    lifts = [nonote, empty, "#", "##", "N", "b", "bb"]
+    # New tokens are appended, never inserted, so that the indices of the
+    # Western tokens stay stable across checkpoints.
+    lifts = [nonote, empty, "#", "##", "N", "b", "bb", *aeu_accidentals]
     return build_dict(lifts)
 
 
@@ -262,7 +298,9 @@ def build_pitch() -> dict[str, int]:
 
 
 def has_rhythm_symbol_a_position(rhythm: str) -> bool:
-    return rhythm.startswith(("note", "rest", "clef"))
+    # keyAccidental carries a pitch and a lift like a note does: that is how a
+    # makam key signature is spelled out. See aeu_accidentals.
+    return rhythm.startswith(("note", "rest", "clef", key_accidental))
 
 
 class Vocabulary:

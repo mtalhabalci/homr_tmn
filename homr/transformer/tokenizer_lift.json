@@ -9,11 +9,25 @@
 	"model": {
 		"type": "WordLevel",
 		"vocab": {
-			"nonote": 0,
-			"lift_null": 1,
-			"lift_#": 2,
-			"lift_b": 3,
-			"lift_N": 4
+			".": 0,
+			"_": 1,
+			"#": 2,
+			"##": 3,
+			"N": 4,
+			"b": 5,
+			"bb": 6,
+			"sharp1": 7,
+			"sharp2": 8,
+			"sharp3": 9,
+			"sharp4": 10,
+			"sharp5": 11,
+			"sharp8": 12,
+			"flat1": 13,
+			"flat2": 14,
+			"flat3": 15,
+			"flat4": 16,
+			"flat5": 17,
+			"flat8": 18
 		},
 		"unk_token": "<unk>"
 	}

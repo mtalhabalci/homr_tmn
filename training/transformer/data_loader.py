@@ -111,11 +111,27 @@ def _filter_valid_samples(samples: list[str]) -> list[str]:
     return valid_samples
 
 
-def load_dataset(samples: list[str], config: Config, val_split: float = 0.0) -> dict[str, Any]:
+def load_dataset(
+    samples: list[str],
+    config: Config,
+    val_split: float = 0.0,
+    validation_samples: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build the train and validation loaders.
+
+    Pass validation_samples when the validation set has already been separated,
+    as the SymbTr converter does. Slicing it off the training list instead would
+    leak: that list is shuffled and oversampled, so the same staff - and always
+    the same works - would appear on both sides and flatter the validation loss.
+    """
     samples = _filter_valid_samples(samples)
-    val_idx = int(len(samples) * val_split)
-    training_list = samples[val_idx:]
-    validation_list = samples[:val_idx]
+    if validation_samples is not None:
+        training_list = samples
+        validation_list = _filter_valid_samples(validation_samples)
+    else:
+        val_idx = int(len(samples) * val_split)
+        training_list = samples[val_idx:]
+        validation_list = samples[:val_idx]
 
     eprint(
         "Training with "

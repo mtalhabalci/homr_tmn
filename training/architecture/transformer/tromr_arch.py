@@ -3,6 +3,7 @@ from typing import Any
 import torch
 from torch import nn
 
+from homr.simple_logging import eprint
 from homr.transformer.configs import Config
 from homr.transformer.vocabulary import EncodedSymbol
 from training.architecture.transformer.decoder import get_decoder
@@ -83,6 +84,36 @@ class TrOMR(nn.Module):
             param.requires_grad = True
 
 
+def _grow_to_fit_vocabulary(
+    model: TrOMR, state: dict[str, torch.Tensor]
+) -> dict[str, torch.Tensor]:
+    """Let a checkpoint from a smaller vocabulary load into a larger one.
+
+    Adding tokens changes the first dimension of the embedding and output layers,
+    which makes load_state_dict fail on a shape mismatch even with strict=False.
+    Tokens are only ever appended (see vocabulary.build_lift / build_rhythm), so
+    the old rows still mean the same thing: copy them across and leave the rows
+    for the new tokens freshly initialised.
+    """
+    current = model.state_dict()
+    adjusted = {}
+    for key, saved in state.items():
+        target = current.get(key)
+        if target is None or saved.shape == target.shape:
+            adjusted[key] = saved
+            continue
+        if saved.dim() != target.dim() or any(
+            s > t for s, t in zip(saved.shape, target.shape)
+        ):
+            eprint(f"Skipping {key}: checkpoint shape {tuple(saved.shape)} does not fit")
+            continue
+        grown = target.clone()
+        grown[tuple(slice(0, s) for s in saved.shape)] = saved.to(grown.dtype)
+        adjusted[key] = grown
+        eprint(f"Grew {key} from {tuple(saved.shape)} to {tuple(target.shape)}")
+    return adjusted
+
+
 def load_model(config: Config) -> TrOMR:
     """Load model from checkpoint."""
     model = TrOMR(config)
@@ -94,11 +125,10 @@ def load_model(config: Config) -> TrOMR:
         with safetensors.safe_open(checkpoint_path, framework="pt", device=0) as f:
             for k in f.keys():
                 tensors[k] = f.get_tensor(k)
-        model.load_state_dict(tensors, strict=False)
+        model.load_state_dict(_grow_to_fit_vocabulary(model, tensors), strict=False)
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model.load_state_dict(
-            torch.load(checkpoint_path, map_location=device, weights_only=True), strict=False
-        )
+        tensors = torch.load(checkpoint_path, map_location=device, weights_only=True)
+        model.load_state_dict(_grow_to_fit_vocabulary(model, tensors), strict=False)
     model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
     return model

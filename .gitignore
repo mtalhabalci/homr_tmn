@@ -45,6 +45,9 @@ _build/
 /canon
 *_try_*
 
+# Local render scratch
+/tmp_render/
+
 # WSL
 *Zone.Identifier
 

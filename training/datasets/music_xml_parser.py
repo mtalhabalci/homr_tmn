@@ -330,16 +330,42 @@ class TokensPart:
         return self.tuplets.get_tuplet_factor(note, position)
 
 
+# Maps MusicXML <accidental> names to lift tokens.
+#
+# "sharp", "flat" and "natural" are ambiguous across repertoires: in Western
+# notation they are a semitone, in makam notation they are 4, 5 and 0 commas.
+# This parser reads Western sources, so those three keep their Western meaning.
+# The remaining names belong to makam notation only and map to comma tokens.
+# Makam training data is not built from MusicXML at all - it comes from the
+# printed page plus the .mu2 score - so no makam file depends on this table.
+_ACCIDENTAL_TO_LIFT: dict[str, str] = {
+    "sharp": "#",
+    "flat": "b",
+    "natural": "N",
+    "quarter-sharp": "sharp1",
+    "slash-quarter-sharp": "sharp5",
+    "slash-sharp": "sharp8",
+    "quarter-flat": "flat1",
+    "slash-flat": "flat4",
+    "double-slash-flat": "flat8",
+}
+
+
 def _lift_from_pitch_or_accidental(pitch: mxl.XMLPitch, note: mxl.XMLNote) -> str:
     # explicit courtesy accidental overrides calculated
     accs = note.get_children_of_type(mxl.XMLAccidental)
     if accs:
         v = accs[0].value_
-        return {"sharp": "#", "flat": "b", "natural": "N"}.get(v, empty)
+        return _ACCIDENTAL_TO_LIFT.get(v, empty)
     alter = pitch.get_children_of_type(mxl.XMLAlter)
     if not alter:
         return empty
-    val = int(alter[0].value_)
+    # Some datasets store microtonal steps as fractional alter values (e.g. -0.5).
+    # int() would raise on those, so parse via float first and fall back to empty.
+    try:
+        val = int(float(alter[0].value_))
+    except (TypeError, ValueError):
+        return empty
     return _alter_to_lifts(val)
 
 

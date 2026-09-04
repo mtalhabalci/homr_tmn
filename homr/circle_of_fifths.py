@@ -2,7 +2,7 @@ import abc
 from abc import ABC
 
 from homr.simple_logging import eprint
-from homr.transformer.vocabulary import EncodedSymbol, empty, nonote
+from homr.transformer.vocabulary import EncodedSymbol, aeu_accidentals, empty, nonote
 
 definition = {
     -7: "CbM",
@@ -148,6 +148,14 @@ def maintain_accidentals_during_measure(
     for symbol in symbols:
         if "barline" in symbol.rhythm:
             key = key.reset_at_end_of_measure()
+            results.append(symbol)
+        elif symbol.lift in aeu_accidentals:
+            # Provisional: pass makam accidentals through untouched. The Western
+            # circle-of-fifths bookkeeping below cannot represent a makam
+            # signature, so applying it here would be worse than doing nothing.
+            # This holds while every altered note is engraved explicitly; once a
+            # makam-aware resolver exists (key signature + measure memory, driven
+            # by the keyAccidental tokens) this branch must defer to it instead.
             results.append(symbol)
         elif symbol.lift != nonote:
             # In engraving, the lift may be empty (implied by key signature or previous accidental)

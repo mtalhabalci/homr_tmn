@@ -8,7 +8,14 @@ import numpy as np
 
 from homr import constants
 from homr.simple_logging import eprint
-from homr.transformer.vocabulary import EncodedSymbol, empty, nonote, sort_token_chords
+from homr.transformer.vocabulary import (
+    EncodedSymbol,
+    aeu_accidentals,
+    empty,
+    key_accidental,
+    nonote,
+    sort_token_chords,
+)
 
 
 class ConversionState:
@@ -201,6 +208,21 @@ def build_measures(
         elif rhythm.startswith("keySignature"):
             attributes = build_or_get_attributes(current_measure, last_attributes)
             build_key(symbol, attributes)
+        elif rhythm == key_accidental:
+            # A makam signature arrives as one keyAccidental symbol per
+            # accidental. Collect the whole consecutive run into a single <key>,
+            # and let the later symbols of that run fall through as no-ops.
+            previous = groups[group_no - 1].symbols[0].rhythm if group_no > 0 else ""
+            if previous != key_accidental:
+                run = []
+                for later in groups[group_no:]:
+                    if later.symbols[0].rhythm != key_accidental:
+                        break
+                    run.append(later.symbols[0])
+                attributes = build_or_get_attributes(current_measure, last_attributes)
+                build_makam_key(run, attributes)
+            else:
+                attributes = last_attributes
         elif rhythm.startswith("timeSignature"):
             attributes = build_or_get_attributes(current_measure, last_attributes)
             build_time_signature(symbol, attributes, state)
@@ -352,6 +374,27 @@ def build_key(model_key: EncodedSymbol, attributes: mxl.XMLAttributes) -> None:
     key.add_child(fifth)
 
 
+def build_makam_key(
+    accidentals: list[EncodedSymbol], attributes: mxl.XMLAttributes
+) -> None:
+    """Write a makam key signature as a MusicXML non-traditional key.
+
+    A makam signature is a list of (pitch, accidental) pairs rather than a
+    position on the circle of fifths, which is what <key-step> is for. We always
+    write <key-alter> alongside: it is what carries the pitch, and a reader that
+    does not know the microtonal glyph names still transposes correctly.
+    """
+    key = mxl.XMLKey()
+    attributes.add_child(key)
+    for symbol in accidentals:
+        alter = LIFT_TO_ALTER.get(symbol.lift)
+        key.add_child(mxl.XMLKeyStep(value_=symbol.pitch[0]))
+        key.add_child(mxl.XMLKeyAlter(value_=alter if alter is not None else 0))
+        accidental = LIFT_TO_ACCIDENTAL.get(symbol.lift)
+        if accidental is not None:
+            key.add_child(mxl.XMLKeyAccidental(value_=accidental))
+
+
 def get_staff(symbol: EncodedSymbol) -> int:
     return 2 if symbol.position == "lower" else 1
 
@@ -454,9 +497,16 @@ def build_time_signature(
 ) -> None:
     time = mxl.XMLTime()
 
-    denominator = model_time_signature.rhythm.split("/")[1]
+    head, denominator = model_time_signature.rhythm.split("/")
     attributes.add_child(time)
-    beats = max(int(state.nominator * int(denominator)), 1)
+    # timeSignature_9/8 states both numbers; the older timeSignature/8 records
+    # only the beat type, so the beat count has to be inferred from the measure
+    # lengths. Turkish usuls (9/8, 10/8, 28/4) need the stated number.
+    _, _, stated = head.partition("_")
+    if stated.isdigit():
+        beats = int(stated)
+    else:
+        beats = max(int(state.nominator * int(denominator)), 1)
     time.add_child(mxl.XMLBeats(value_=str(beats)))
     time.add_child(mxl.XMLBeatType(value_=denominator))
     state.beats = beats
@@ -497,6 +547,35 @@ LIFT_TO_ALTER = {
     "##": 2,
     "b": -1,
     "bb": -2,
+}
+
+# The makam lift tokens are named by comma count (see vocabulary.aeu_accidentals).
+# A whole tone is 9 commas and 2 semitones, so one comma is 2/9 of a semitone.
+# <alter> carries the sounding pitch; <accidental> below carries the printed glyph.
+LIFT_TO_ALTER.update(
+    {
+        f"{'sharp' if c > 0 else 'flat'}{abs(c)}": round(c * 2 / 9, 3)
+        for c in (1, 2, 3, 4, 5, 8, -1, -2, -3, -4, -5, -8)
+    }
+)
+
+# Printed glyph. MusicXML names only six of the ten makam accidentals, so the
+# 2- and 3-comma steps fall back to the nearest named glyph and lose a little
+# information on export - the <alter> above stays exact either way. Change this
+# table freely; it does not affect what the model learns.
+LIFT_TO_ACCIDENTAL = {
+    "sharp1": "quarter-sharp",
+    "sharp2": "quarter-sharp",
+    "sharp3": "sharp",
+    "sharp4": "sharp",
+    "sharp5": "slash-quarter-sharp",
+    "sharp8": "slash-sharp",
+    "flat1": "quarter-flat",
+    "flat2": "quarter-flat",
+    "flat3": "slash-flat",
+    "flat4": "slash-flat",
+    "flat5": "flat",
+    "flat8": "double-slash-flat",
 }
 
 DURATION_NAMES = {
@@ -609,8 +688,14 @@ def build_note_or_rest(
         if model_note.lift == nonote:
             eprint("WARNING note with invalid lift", model_note)
         elif model_note.lift != empty:
-            pitch.add_child(mxl.XMLAlter(value_=LIFT_TO_ALTER[model_note.lift]))
+            alter_value = LIFT_TO_ALTER.get(model_note.lift)
+            if alter_value is not None:
+                pitch.add_child(mxl.XMLAlter(value_=alter_value))
         note.add_child(pitch)
+        # Emit an explicit <accidental> for the makam glyphs so the renderer
+        # (e.g. MuseScore) draws the correct microtonal symbol.
+        if model_note.lift in aeu_accidentals:
+            note.add_child(mxl.XMLAccidental(value_=LIFT_TO_ACCIDENTAL[model_note.lift]))
 
     if "G" in model_note.rhythm:
         note.add_child(mxl.XMLGrace())
