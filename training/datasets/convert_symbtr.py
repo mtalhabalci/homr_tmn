@@ -33,7 +33,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from homr.simple_logging import eprint
-from homr.transformer.vocabulary import EncodedSymbol, aeu_commas, key_accidental
+from homr.transformer.vocabulary import EncodedSymbol, aeu_commas, empty, key_accidental
 
 script_location = os.path.dirname(os.path.realpath(__file__))
 git_root = Path(script_location).parent.parent.absolute()
@@ -291,7 +291,45 @@ def split_duration(duration: Fraction) -> list[tuple[int, int]]:
     return _greedy_split(duration, _PLAIN_UNITS) or _greedy_split(duration, _TUPLET_UNITS) or []
 
 
-def tokens_for_event(event: dict, unresolved: collections.Counter) -> list[EncodedSymbol]:
+class EngravingState:
+    """Works out which accidentals are actually printed in front of the notes.
+
+    The .mu2 spells out the sounding pitch of every note, but a printed score
+    shows an accidental only where the note departs from what the reader already
+    knows: the key signature at the head of the staff, plus any accidental set
+    earlier in the same measure. Roughly four out of five altered notes carry no
+    sign at all.
+
+    The label has to be what is on the page, because the page is all the model
+    ever sees. Recovering the sounding pitch from the printed symbols is the
+    reader's job, and downstream ours - see homr/circle_of_fifths.py.
+    """
+
+    def __init__(self, key: str):
+        self.signature: dict[str, int] = {}
+        for entry in (part.strip() for part in key.split("/")):
+            parsed = parse_note_name(entry) if entry else None
+            if parsed:
+                self.signature[parsed[0][0]] = parsed[1]
+        self.measure: dict[str, int] = {}
+
+    def start_measure(self) -> None:
+        self.measure = {}
+
+    def drawn_lift(self, pitch: str, commas: int) -> str:
+        """The accidental printed before this note, or empty if there is none."""
+        letter, expected = pitch[0], self.measure.get(pitch)
+        if expected is None:
+            expected = self.signature.get(letter, 0)
+        if commas == expected:
+            return empty
+        self.measure[pitch] = commas
+        return lift_for_commas(commas)
+
+
+def tokens_for_event(
+    event: dict, unresolved: collections.Counter, state: EngravingState | None = None
+) -> list[EncodedSymbol]:
     pitch = parse_note_name(event["name"])
     if event["grace"]:
         parts, suffix = [(8, 0)], "G"
@@ -300,6 +338,15 @@ def tokens_for_event(event: dict, unresolved: collections.Counter) -> list[Encod
         if not parts:
             unresolved[str(event["duration"])] += 1
             return []
+    # The accidental is whatever the engraver put on the page. Tied halves of one
+    # note share a notehead's worth of ink, so only the first can carry a sign.
+    if pitch is None:
+        lift = "_"
+    elif state is None:
+        lift = lift_for_commas(pitch[1])
+    else:
+        lift = state.drawn_lift(pitch[0], pitch[1])
+
     symbols = []
     for index, (base, dots) in enumerate(parts):
         kern = f"{base}{'.' * dots}{suffix}"
@@ -313,7 +360,9 @@ def tokens_for_event(event: dict, unresolved: collections.Counter) -> list[Encod
         else:
             articulation = "tieStop"
         symbols.append(
-            EncodedSymbol(f"note_{kern}", pitch[0], lift_for_commas(pitch[1]), articulation, "upper")
+            EncodedSymbol(
+                f"note_{kern}", pitch[0], lift if index == 0 else "_", articulation, "upper"
+            )
         )
     return symbols
 
@@ -444,6 +493,7 @@ def _staff_tokens(
     score: Mu2Score,
     is_first_staff: bool,
     unresolved: collections.Counter,
+    state: EngravingState,
 ) -> list[EncodedSymbol]:
     # Mus2 redraws the clef and the whole key signature at the head of every
     # system, so every staff sample carries them; only the time signature is
@@ -463,8 +513,9 @@ def _staff_tokens(
         closing = next((e["close"] for e in measure if e.get("close")), None)
         if opening:
             tokens.append(EncodedSymbol(opening))
+        state.start_measure()
         for event in measure:
-            tokens.extend(tokens_for_event(event, unresolved))
+            tokens.extend(tokens_for_event(event, unresolved, state))
         tokens.append(EncodedSymbol(closing or "barline"))
     return tokens
 
@@ -515,6 +566,9 @@ def convert_work(
             raise SkippedWork("no staves found on the page")
 
         measures = _cut_into_measures(score)
+        # One state for the whole work: the key signature holds throughout and
+        # a measure's accidentals carry on across a system break.
+        state = EngravingState(score.key)
         page_measures = sum(len(staff["bars"]) for staff in staves)
         # The final barline is often heavy or doubled and can go undetected.
         if abs(len(measures) - page_measures) > 1:
@@ -533,7 +587,7 @@ def convert_work(
                 else measures[taken : taken + len(staff["bars"])]
             )
             taken += len(mine)
-            tokens = _staff_tokens(mine, score, index == 0, unresolved)
+            tokens = _staff_tokens(mine, score, index == 0, unresolved, state)
             if not tokens:
                 continue
             base = os.path.join(working_dir, f"{stem}-{index:02d}")
