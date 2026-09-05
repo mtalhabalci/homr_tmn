@@ -93,6 +93,38 @@ def download_training_checkpoint(config: Config) -> None:
         sys.exit(1)
 
 
+def seed_makam_accidentals(model: TrOMR, config: Config) -> None:
+    """Start the makam accidentals from the Western ones they replace.
+
+    Grown-in tokens begin from random weights while the tokens they supersede
+    carry years of training, so the model keeps answering "#" to a sharp it is
+    now meant to call sharp4. After three epochs every accidental class still
+    scored zero recall, with 483 sharps read as "#".
+
+    The glyphs are the same shape: an ordinary sharp is the 4-comma sharp, an
+    ordinary flat the 5-comma one. Copying the old rows into the new ones hands
+    the model that knowledge instead of making it rediscover it, leaving only
+    the comma distinctions to learn. The Western accidentals are then pushed out
+    of reach, since makam labels never use them and a tie would otherwise be
+    settled by whichever weights are better trained.
+    """
+    vocab = config.lift_vocab
+    net = model.decoder.net
+    with torch.no_grad():
+        for token, index in vocab.items():
+            source = "#" if token.startswith("sharp") else "b" if token.startswith("flat") else None
+            if source is None or source not in vocab:
+                continue
+            origin = vocab[source]
+            net.lift_emb.emb.weight[index] = net.lift_emb.emb.weight[origin]
+            net.to_logits_lift.weight[index] = net.to_logits_lift.weight[origin]
+            net.to_logits_lift.bias[index] = net.to_logits_lift.bias[origin]
+        unused = [vocab[t] for t in ("#", "##", "b", "bb") if t in vocab]
+        for index in unused:
+            net.to_logits_lift.bias[index] = -1e4
+    eprint(f"Seeded {len(vocab) - 7} makam accidentals and retired {len(unused)} Western ones")
+
+
 def load_training_index(file_path: str) -> list[str]:
     with open(file_path) as f:
         return f.readlines()
@@ -157,6 +189,7 @@ def train_transformer(
     limit: int | None = None,
     lift_only: bool = False,
     work_dir: str | None = None,
+    lr: float | None = None,
 ) -> None:
     number_of_epochs = 35
     if smoke_test:
@@ -234,6 +267,11 @@ def train_transformer(
     if compile_model:
         eprint("Compiling model")
 
+    # Fine-tuning normally nudges weights that are already close. Here whole
+    # output classes are new, so the default 1e-5 barely moves them.
+    learning_rate = lr if lr is not None else (5e-5 if fine_tune else 1e-4)
+    eprint(f"Learning rate {learning_rate}")
+
     run_id = get_run_id()
 
     batch_size = 6 if fp32 else 18
@@ -246,7 +284,7 @@ def train_transformer(
         # Full checkpoints carry the optimiser state and run to a gigabyte;
         # keep only what a resume needs plus the best model.
         save_total_limit=2,
-        learning_rate=1e-5 if fine_tune else 1e-4,
+        learning_rate=learning_rate,
         optim="adamw_torch_fused",
         gradient_accumulation_steps=4,
         per_device_train_batch_size=batch_size,
@@ -272,6 +310,7 @@ def train_transformer(
         eprint("Fine tuning model from", config.filepaths.checkpoint)
         download_training_checkpoint(config)
         model = load_model(config)
+        seed_makam_accidentals(model, config)
         model.freeze_encoder()
         model.freeze_decoder()
         model.unfreeze_lift_decoder()
@@ -343,6 +382,9 @@ if __name__ == "__main__":
         help="Train only the accidental branch, leaving rhythm reading untouched.",
     )
     parser.add_argument(
+        "--lr", type=float, default=None, help="Override the learning rate."
+    )
+    parser.add_argument(
         "--work-dir",
         default=None,
         help="Where to keep checkpoints and the finished model. Point it at "
@@ -358,6 +400,7 @@ if __name__ == "__main__":
             limit=options.limit,
             lift_only=options.lift_only,
             work_dir=options.work_dir,
+            lr=options.lr,
         )
     else:
         train_transformer(smoke_test=True)
