@@ -96,7 +96,16 @@ TURKISH_NOTE_NAMES = {
 # 5-comma sharp (eviç) is the one this dataset exists for and appears on the
 # order of a hundred times, against tens of thousands for the common glyphs.
 RARE_LIFTS = ("sharp5", "sharp2", "sharp8", "flat8")
-OVERSAMPLE_FACTOR = 8
+# A class the model never sees enough of stays at zero recall, so scarce staffs
+# get repeated. Repeating by a flat factor overshot badly: sharp5 ended up
+# eleven times more common in training than on a real page, and the model
+# learned to reach for it whenever it was unsure -- 58% recall at 8% precision,
+# eating flat1 and flat2 along the way. Count up to a target instead, so every
+# class becomes learnable without any class acquiring a false prior. flat3 sits
+# near this figure with 1133 examples and reaches 81% recall, which is what the
+# target is calibrated on.
+RARE_LIFT_TARGET = 1500
+MAX_REPEATS = 8
 VAL_FRACTION = 0.1
 TEST_FRACTION = 0.1
 # A glyph carried by fewer works than this cannot be split three ways, so every
@@ -710,6 +719,53 @@ def _work_of(line: str) -> str:
     return _STAFF_SUFFIX.sub("", os.path.basename(line.strip().split(",")[0]))
 
 
+def _lift_counts(line: str) -> collections.Counter:
+    """How many of each drawn accidental one staff carries."""
+    token_path = git_root / line.strip().split(",")[1]
+    if not token_path.exists():
+        return collections.Counter()
+    counts: collections.Counter = collections.Counter()
+    for token_line in token_path.read_text(encoding="utf-8").splitlines():
+        parts = token_line.split()
+        if len(parts) == 5 and parts[2] not in (".", "_"):
+            counts[parts[2]] += 1
+    return counts
+
+
+def _oversample(train: list[str], rng: random.Random) -> list[str]:
+    """Repeat scarce staffs one at a time, stopping at RARE_LIFT_TARGET.
+
+    Works the classes from rarest upwards and keeps a running tally, so a staff
+    repeated for one accidental also counts towards every other accidental it
+    carries. MAX_REPEATS bounds a class too scarce to reach the target at all.
+    """
+    per_line = {line: _lift_counts(line) for line in train}
+    running: collections.Counter = collections.Counter()
+    for line in train:
+        running.update(per_line[line])
+
+    extra: list[str] = []
+    for lift in sorted(running, key=lambda name: running[name]):
+        if running[lift] >= RARE_LIFT_TARGET:
+            continue
+        carriers = [line for line in train if per_line[line][lift]]
+        if not carriers:
+            continue
+        rng.shuffle(carriers)
+        budget = len(carriers) * (MAX_REPEATS - 1)
+        added = 0
+        while running[lift] < RARE_LIFT_TARGET and added < budget:
+            line = carriers[added % len(carriers)]
+            extra.append(line)
+            running.update(per_line[line])
+            added += 1
+        eprint(
+            f"  {lift}: {added} extra staffs -> {running[lift]} occurrences"
+            + ("" if running[lift] >= RARE_LIFT_TARGET else " (ran out of staffs)")
+        )
+    return extra
+
+
 def _lifts_in(line: str) -> set[str]:
     token_path = git_root / line.strip().split(",")[1]
     if not token_path.exists():
@@ -723,8 +779,8 @@ def split_and_balance(lines: list[str], seed: int = 0) -> dict[str, list[str]]:
 
     Only a glyph too scarce to divide at all is pinned to training; everything
     else is split randomly so the test set still contains the rare glyphs and
-    their recognition can actually be measured. Rare staffs are then repeated
-    within training.
+    their recognition can actually be measured. Staffs carrying an accidental
+    the training set is thin on are then repeated, up to a target count.
     """
     works: dict[str, list[str]] = {}
     for line in lines:
@@ -763,7 +819,8 @@ def split_and_balance(lines: list[str], seed: int = 0) -> dict[str, list[str]]:
         return [line for name in names for line in works[name]]
 
     train = collect(train_works)
-    train += [line for line in train for _ in range(OVERSAMPLE_FACTOR - 1) if _lifts_in(line)]
+    eprint(f"Topping scarce accidentals up to {RARE_LIFT_TARGET} occurrences:")
+    train += _oversample(train, rng)
     rng.shuffle(train)
     return {"train": train, "val": collect(val_works), "test": collect(test_works)}
 
