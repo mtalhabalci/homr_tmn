@@ -156,6 +156,7 @@ def train_transformer(
     epochs: int | None = None,
     limit: int | None = None,
     lift_only: bool = False,
+    work_dir: str | None = None,
 ) -> None:
     number_of_epochs = 35
     if smoke_test:
@@ -167,11 +168,20 @@ def train_transformer(
     resume_from_checkpoint = None
     validation_index: list[str] | None = None
 
-    checkpoint_folder = "current_training"
+    # A Colab runtime can disappear mid-run, taking hours of training with it.
+    # Point work_dir at mounted Drive and both the per-epoch checkpoints and the
+    # finished model survive, so --resume can pick the run back up.
+    checkpoint_folder = os.path.join(work_dir, "current_training") if work_dir \
+        else "current_training"
     if resume:
-        resume_from_checkpoint = os.path.join(git_root, checkpoint_folder, resume)
-    elif os.path.exists(os.path.join(git_root, checkpoint_folder)):
+        resume_from_checkpoint = (
+            os.path.join(checkpoint_folder, resume) if work_dir
+            else os.path.join(git_root, checkpoint_folder, resume)
+        )
+    elif not work_dir and os.path.exists(os.path.join(git_root, checkpoint_folder)):
         shutil.rmtree(os.path.join(git_root, checkpoint_folder))
+    if work_dir:
+        os.makedirs(checkpoint_folder, exist_ok=True)
 
     if smoke_test:
         number_of_files = -1
@@ -233,6 +243,9 @@ def train_transformer(
         torch_compile=compile_model,
         eval_strategy="epoch",
         save_strategy="epoch",
+        # Full checkpoints carry the optimiser state and run to a gigabyte;
+        # keep only what a resume needs plus the best model.
+        save_total_limit=2,
         learning_rate=1e-5 if fine_tune else 1e-4,
         optim="adamw_torch_fused",
         gradient_accumulation_steps=4,
@@ -279,7 +292,9 @@ def train_transformer(
     model_name = "pytorch_model"
 
     model_destination = os.path.join(
-        git_root, "training", "architecture", "transformer", f"{model_name}_{run_id}.pth"
+        work_dir if work_dir
+        else os.path.join(git_root, "training", "architecture", "transformer"),
+        f"{model_name}_{run_id}.pth",
     )
 
     if os.path.exists(model_destination):
@@ -327,6 +342,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Train only the accidental branch, leaving rhythm reading untouched.",
     )
+    parser.add_argument(
+        "--work-dir",
+        default=None,
+        help="Where to keep checkpoints and the finished model. Point it at "
+             "mounted Drive so a lost Colab runtime does not lose the run.",
+    )
     options = parser.parse_args()
     if options.fine:
         train_transformer(
@@ -336,6 +357,7 @@ if __name__ == "__main__":
             epochs=options.epochs,
             limit=options.limit,
             lift_only=options.lift_only,
+            work_dir=options.work_dir,
         )
     else:
         train_transformer(smoke_test=True)
