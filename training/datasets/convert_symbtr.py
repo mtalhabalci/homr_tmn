@@ -322,13 +322,15 @@ class EngravingState:
         letter, expected = pitch[0], self.measure.get(pitch)
         if expected is None:
             expected = self.signature.get(letter, 0)
-        if commas == expected:
+        # Compare what would be *printed*, not what sounds. AEU has no sign for a
+        # 2- or 3-comma step and most scores print the nearest one it does have
+        # (see printed_rounding), which makes two comma values share a glyph.
+        # Moving between them changes nothing on the page, so nothing is drawn.
+        shown = self.rounding.get(commas, commas)
+        if shown == self.rounding.get(expected, expected):
             return empty
         self.measure[pitch] = commas
-        # AEU has no sign for a 2- or 3-comma step, and most engravers print the
-        # nearest one it does have. Which convention a score follows is decided
-        # per file, see printed_rounding.
-        return lift_for_commas(self.rounding.get(commas, commas))
+        return lift_for_commas(shown)
 
 
 def tokens_for_event(
@@ -418,6 +420,65 @@ ACCIDENTAL_GLYPHS = {
 NEAREST_AEU = {2: 1, 3: 4, -2: -1, -3: -4}
 
 
+def _key_signature_glyphs(document: "fitz.Document") -> list[int] | None:  # noqa: F821
+    """Character codes of the key signature on the first staff, left to right.
+
+    Returns None when the codes cannot be trusted. The Mus2 font is subsetted
+    per PDF, and while nearly every file uses the same encoding, a few do not:
+    in gerdaniye--turku--aksak--salina_salina the 2-comma flat comes through as
+    0x71, which elsewhere is the treble clef. Reading that file's glyphs would
+    say the key signature is smaller than it is and mark every note it covers.
+    """
+    page = document[0]
+    staves = _staff_lines(page)
+    if not staves:
+        return None
+    top, bottom = staves[0][0], staves[0][-1]
+    height = bottom - top
+    found = sorted(
+        (glyph[0], glyph[4])
+        for glyph in _mus2_glyphs(page)
+        if glyph[5] >= 24 and glyph[0] < 60
+        and top - height < (glyph[2] + glyph[3]) / 2 < bottom + height
+    )
+    codes = [code for _, code in found]
+    if any(code not in ACCIDENTAL_GLYPHS for code in codes):
+        return None
+    return codes
+
+
+def printed_key_signature(document: "fitz.Document", key: str) -> str:  # noqa: F821
+    """Trim the .mu2 key signature down to the accidentals actually engraved.
+
+    The two do not always agree. A score may leave an accidental out of the
+    printed signature and mark that note individually instead - the .mu2 for
+    hicaz--sarki--turkaksagi--solsan_da_sararsan lists three, the page shows two,
+    and the missing sharp appears on twenty-five noteheads. Believing the .mu2
+    there would suppress every one of those signs in the labels.
+
+    The printed glyphs are matched to the .mu2 entries in order by comma value,
+    which is enough: a signature never repeats a letter.
+    """
+    tokens = [part.strip() for part in key.split("/") if part.strip()]
+    codes = _key_signature_glyphs(document)
+    if not tokens or codes is None:
+        return key
+    remaining = [ACCIDENTAL_GLYPHS[code] for code in codes]
+    kept = []
+    for token in tokens:
+        parsed = parse_note_name(token)
+        if not parsed:
+            continue
+        # The signature itself may be engraved with the rounded sign, so a
+        # 2-comma entry can show up on the page as the 1-comma glyph.
+        for candidate in (parsed[1], NEAREST_AEU.get(parsed[1])):
+            if candidate is not None and candidate in remaining:
+                remaining.remove(candidate)
+                kept.append(token)
+                break
+    return "/".join(kept)
+
+
 def printed_rounding(document: "fitz.Document") -> dict[int, int]:  # noqa: F821
     """Decide whether this score rounds its 2- and 3-comma accidentals.
 
@@ -425,6 +486,10 @@ def printed_rounding(document: "fitz.Document") -> dict[int, int]:  # noqa: F821
     for them or rounds to the nearest AEU sign - consistently, one way per file.
     If a value's own sign appears nowhere on the page, the score rounds it.
     """
+    if _key_signature_glyphs(document) is None:
+        # This file does not use the usual encoding, so an absent code proves
+        # nothing. Take the .mu2 at face value rather than guess.
+        return {}
     seen: set[int] = set()
     for page in document:
         for glyph in _mus2_glyphs(page):
@@ -597,6 +662,7 @@ def convert_work(
         measures = _cut_into_measures(score)
         # One state for the whole work: the key signature holds throughout and
         # a measure's accidentals carry on across a system break.
+        score.key = printed_key_signature(document, score.key)
         state = EngravingState(score.key, printed_rounding(document))
         page_measures = sum(len(staff["bars"]) for staff in staves)
         # The final barline is often heavy or doubled and can go undetected.
