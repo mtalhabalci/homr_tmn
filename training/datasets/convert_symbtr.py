@@ -305,13 +305,14 @@ class EngravingState:
     reader's job, and downstream ours - see homr/circle_of_fifths.py.
     """
 
-    def __init__(self, key: str):
+    def __init__(self, key: str, rounding: dict[int, int] | None = None):
         self.signature: dict[str, int] = {}
         for entry in (part.strip() for part in key.split("/")):
             parsed = parse_note_name(entry) if entry else None
             if parsed:
                 self.signature[parsed[0][0]] = parsed[1]
         self.measure: dict[str, int] = {}
+        self.rounding = rounding or {}
 
     def start_measure(self) -> None:
         self.measure = {}
@@ -324,7 +325,10 @@ class EngravingState:
         if commas == expected:
             return empty
         self.measure[pitch] = commas
-        return lift_for_commas(commas)
+        # AEU has no sign for a 2- or 3-comma step, and most engravers print the
+        # nearest one it does have. Which convention a score follows is decided
+        # per file, see printed_rounding.
+        return lift_for_commas(self.rounding.get(commas, commas))
 
 
 def tokens_for_event(
@@ -403,6 +407,31 @@ def _staff_lines(page: "fitz.Page") -> list[list[float]]:  # noqa: F821
 NOTEHEAD_GLYPHS = frozenset(
     {0x78, 0x2A, 0x2B, 0x6F, 0x25, 0x27, 0x28, 0x29, 0x2C, 0x74}
 )
+
+# The Mus2 font draws one accidental per comma value. Reading them back tells us
+# which signs a particular score actually uses.
+ACCIDENTAL_GLYPHS = {
+    0x54: -1, 0x53: -2, 0x52: -3, 0x51: -4, 0x50: -5,
+    0x55: 1, 0x56: 2, 0x57: 3, 0x58: 4, 0x59: 5, 0x5C: 8,
+}
+# Where AEU has no sign, the nearest one it does have.
+NEAREST_AEU = {2: 1, 3: 4, -2: -1, -3: -4}
+
+
+def printed_rounding(document: "fitz.Document") -> dict[int, int]:  # noqa: F821
+    """Decide whether this score rounds its 2- and 3-comma accidentals.
+
+    Those two steps sit outside AEU, and a score either prints the sign Mus2 has
+    for them or rounds to the nearest AEU sign - consistently, one way per file.
+    If a value's own sign appears nowhere on the page, the score rounds it.
+    """
+    seen: set[int] = set()
+    for page in document:
+        for glyph in _mus2_glyphs(page):
+            commas = ACCIDENTAL_GLYPHS.get(glyph[4])
+            if commas is not None:
+                seen.add(commas)
+    return {value: nearest for value, nearest in NEAREST_AEU.items() if value not in seen}
 
 
 def _mus2_glyphs(page: "fitz.Page") -> list[tuple]:  # noqa: F821
@@ -568,7 +597,7 @@ def convert_work(
         measures = _cut_into_measures(score)
         # One state for the whole work: the key signature holds throughout and
         # a measure's accidentals carry on across a system break.
-        state = EngravingState(score.key)
+        state = EngravingState(score.key, printed_rounding(document))
         page_measures = sum(len(staff["bars"]) for staff in staves)
         # The final barline is often heavy or doubled and can go undetected.
         if abs(len(measures) - page_measures) > 1:
