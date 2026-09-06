@@ -221,9 +221,17 @@ def read_mu2(path: str) -> Mu2Score:
             key = fields[8].strip()
             continue
         opening, closing = fields[7].strip(), fields[8].strip()
+        marks: tuple[str | None, str | None] | None = None
         if opening in OPENING_MARKS or closing in CLOSING_MARKS:
-            pending_marks = (OPENING_MARKS.get(opening), CLOSING_MARKS.get(closing))
-            continue
+            marks = (OPENING_MARKS.get(opening), CLOSING_MARKS.get(closing))
+            # A repeat sign often shares its row with the note it applies to.
+            # Treating every marked row as a marker threw those notes away:
+            # 18,265 of them across 1,617 of the 2,200 works, which both taught
+            # the model to skip a note that is plainly on the page and left the
+            # measures short, so the work was dropped for not closing.
+            if code not in NOTE_CODES and code not in GRACE_CODES:
+                pending_marks = marks
+                continue
         if code in GRACE_CODES:
             events.append({"name": fields[1].strip(), "duration": Fraction(0), "grace": True})
             continue
@@ -239,8 +247,11 @@ def read_mu2(path: str) -> Mu2Score:
             "duration": Fraction(int(numerator), int(denominator)),
             "grace": False,
         }
-        if pending_marks:
-            event["open"], event["close"] = pending_marks
+        if pending_marks or marks:
+            before = pending_marks or (None, None)
+            here = marks or (None, None)
+            event["open"] = before[0] or here[0]
+            event["close"] = before[1] or here[1]
             pending_marks = None
         events.append(event)
     if not events:
