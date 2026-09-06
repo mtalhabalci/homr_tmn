@@ -190,6 +190,7 @@ def train_transformer(
     lift_only: bool = False,
     work_dir: str | None = None,
     lr: float | None = None,
+    full: bool = False,
 ) -> None:
     number_of_epochs = 35
     if smoke_test:
@@ -269,7 +270,17 @@ def train_transformer(
 
     # Fine-tuning normally nudges weights that are already close. Here whole
     # output classes are new, so the default 1e-5 barely moves them.
-    learning_rate = lr if lr is not None else (5e-5 if fine_tune else 1e-4)
+    if lr is not None:
+        learning_rate = lr
+    elif not fine_tune:
+        learning_rate = 1e-4
+    elif full:
+        # Every weight moves now, including features that took the whole
+        # Western corpus to learn, so step an order of magnitude smaller than
+        # when only the freshly seeded output layers were free.
+        learning_rate = 2e-5
+    else:
+        learning_rate = 5e-5
     eprint(f"Learning rate {learning_rate}")
 
     run_id = get_run_id()
@@ -311,15 +322,30 @@ def train_transformer(
         download_training_checkpoint(config)
         model = load_model(config)
         seed_makam_accidentals(model, config)
-        model.freeze_encoder()
-        model.freeze_decoder()
-        model.unfreeze_lift_decoder()
-        if lift_only:
+        if full:
+            # Freezing everything but the output layers leaves 0.5% of the
+            # network trainable: a linear readout of features a Western model
+            # learned. That is enough to relabel a sharp as sharp4, and never
+            # enough to tell a one-comma sharp from a four-comma one or to read
+            # the small digit that separates flat1 from flat2, because those
+            # distinctions are not in the frozen features to begin with. They
+            # stalled between zero and forty percent while everything inferable
+            # from position went past ninety.
+            for param in model.parameters():
+                param.requires_grad = True
+            eprint("Training the whole network")
+        elif lift_only:
+            model.freeze_encoder()
+            model.freeze_decoder()
+            model.unfreeze_lift_decoder()
             eprint("Training the lift branch only")
         else:
             # The makam key signature and the usul are rhythm tokens, so the
             # rhythm branch has to learn too. Pass --lift-only for the safer,
             # narrower run that cannot disturb how symbols are read at all.
+            model.freeze_encoder()
+            model.freeze_decoder()
+            model.unfreeze_lift_decoder()
             model.unfreeze_rhythm_decoder()
             eprint("Training the lift and rhythm branches")
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -385,6 +411,12 @@ if __name__ == "__main__":
         "--lr", type=float, default=None, help="Override the learning rate."
     )
     parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Train every weight, not just the output layers. Needed for glyph "
+             "distinctions the Western encoder never had to make.",
+    )
+    parser.add_argument(
         "--work-dir",
         default=None,
         help="Where to keep checkpoints and the finished model. Point it at "
@@ -401,6 +433,7 @@ if __name__ == "__main__":
             lift_only=options.lift_only,
             work_dir=options.work_dir,
             lr=options.lr,
+            full=options.full,
         )
     else:
         train_transformer(smoke_test=True)
