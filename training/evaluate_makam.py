@@ -367,7 +367,7 @@ def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
             hypothesis = [
                 (s.rhythm, s.pitch, s.lift, s.articulation, s.position)
                 for s in produced
-                if not s.is_special()
+                if not s.is_control_symbol()
             ]
             reference = _symbols_from_batch(batch, names, 0)
             pairs = _align(reference, hypothesis)
