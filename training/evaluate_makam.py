@@ -49,6 +49,18 @@ from training.datasets.convert_symbtr import symbtr_test_index
 from training.transformer.data_loader import load_dataset
 
 BRANCHES = ("rhythm", "pitch", "lift", "position", "articulations")
+# EncodedSymbol names one branch differently. Deriving the attribute from
+# BRANCHES keeps a generated symbol and a labelled one in the same column order;
+# writing the two tuples out by hand once put position where articulation was
+# expected, which marked nearly every symbol wrong while the per-branch figures
+# stayed healthy.
+SYMBOL_ATTRIBUTE = {
+    "rhythm": "rhythm",
+    "pitch": "pitch",
+    "lift": "lift",
+    "position": "position",
+    "articulations": "articulation",
+}
 
 
 def _vocabularies(config: Config) -> dict[str, dict[str, int]]:
@@ -369,7 +381,7 @@ def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
             image = batch["inputs"].to(device)
             produced = model.generate(image)
             hypothesis = [
-                (s.rhythm, s.pitch, s.lift, s.articulation, s.position)
+                tuple(getattr(s, SYMBOL_ATTRIBUTE[branch]) for branch in BRANCHES)
                 for s in produced
                 if not s.is_control_symbol()
             ]
