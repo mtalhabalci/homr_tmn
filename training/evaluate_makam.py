@@ -335,6 +335,10 @@ def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
         eprint(f"No checkpoint at {config.filepaths.checkpoint}")
         sys.exit(1)
 
+    if not os.path.exists(symbtr_test_index):
+        eprint(f"No test index at {symbtr_test_index}. Unpack the dataset first.")
+        sys.exit(1)
+
     with open(symbtr_test_index, encoding="utf-8") as handle:
         samples = [line for line in handle if line.strip()]
     if limit:
