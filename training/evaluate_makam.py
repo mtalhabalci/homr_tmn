@@ -7,10 +7,17 @@ how each symbol fares individually, and what it gets confused with.
 
     python -m training.evaluate_makam
     python -m training.evaluate_makam --checkpoint path/to/model.pth --limit 300
+    python -m training.evaluate_makam --checkpoint <the western .pth> --lenient
 
 Reports, for every branch, per-class recall and precision, and for the
 accidentals also the confusions that actually happen. Symbols the model drops
 or invents are counted separately, since not losing symbols is the priority.
+
+--lenient scores the checkpoint homr ships, which has no makam tokens at all.
+Marking its every accidental wrong would overstate the gap, since a Western
+sharp is the four-comma sharp and a Western flat the five-comma flat -- the same
+glyph under another name. Under --lenient those two count as correct, so the
+baseline is read as generously as it honestly can be.
 
 Per-branch figures flatter the model, though: they ask whether the duration was
 right and, separately, whether the pitch was right. A player hears neither in
@@ -45,7 +52,9 @@ def _vocabularies(config: Config) -> dict[str, dict[str, int]]:
     }
 
 
-def evaluate(checkpoint: str | None, limit: int | None, batch_size: int) -> None:
+def evaluate(
+    checkpoint: str | None, limit: int | None, batch_size: int, lenient: bool = False
+) -> None:
     config = Config()
     if checkpoint:
         config.filepaths.checkpoint = checkpoint
@@ -88,6 +97,19 @@ def evaluate(checkpoint: str | None, limit: int | None, batch_size: int) -> None
         index for token, index in config.rhythm_vocab.items() if token.startswith("note")
     ]
 
+    lift_remap = None
+    if lenient:
+        # The Western sharp is the four-comma sharp and the Western flat the
+        # five-comma flat: same glyph, different name. Let a checkpoint that
+        # only knows the Western names score them.
+        pairs = {"#": "sharp4", "b": "flat5"}
+        lift_remap = list(range(len(config.lift_vocab)))
+        for western, makam in pairs.items():
+            if western in config.lift_vocab and makam in config.lift_vocab:
+                lift_remap[config.lift_vocab[western]] = config.lift_vocab[makam]
+        lift_remap = torch.tensor(lift_remap, device=device)
+        eprint(f"Lenient scoring: {', '.join(f'{k} counts as {v}' for k, v in pairs.items())}")
+
     with torch.no_grad():
         for batch in loader:
             batch = {k: v.to(device) for k, v in batch.items() if torch.is_tensor(v)}
@@ -111,6 +133,8 @@ def evaluate(checkpoint: str | None, limit: int | None, batch_size: int) -> None
                 preds = branch_logits.argmax(dim=-1)
                 length = min(preds.shape[1], labels.shape[1], eval_mask.shape[1])
                 preds, labels = preds[:, :length], labels[:, :length]
+                if branch == "lift" and lift_remap is not None:
+                    preds = lift_remap[preds]
                 mask = (labels != -100) & eval_mask[:, :length]
                 step[branch] = (preds, labels)
                 for predicted, actual in zip(preds[mask].tolist(), labels[mask].tolist()):
@@ -235,5 +259,11 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", default=None, help="Model to evaluate.")
     parser.add_argument("--limit", type=int, default=None, help="Use only N staffs.")
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument(
+        "--lenient",
+        action="store_true",
+        help="Count a Western sharp as sharp4 and a Western flat as flat5, so a "
+             "checkpoint without makam tokens can be scored fairly.",
+    )
     options = parser.parse_args()
-    evaluate(options.checkpoint, options.limit, options.batch_size)
+    evaluate(options.checkpoint, options.limit, options.batch_size, options.lenient)
