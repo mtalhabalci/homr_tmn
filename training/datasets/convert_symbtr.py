@@ -224,23 +224,32 @@ def read_mu2(path: str) -> Mu2Score:
         marks: tuple[str | None, str | None] | None = None
         if opening in OPENING_MARKS or closing in CLOSING_MARKS:
             marks = (OPENING_MARKS.get(opening), CLOSING_MARKS.get(closing))
-            # A repeat sign often shares its row with the note it applies to.
-            # Treating every marked row as a marker threw those notes away:
-            # 18,265 of them across 1,617 of the 2,200 works, which both taught
-            # the model to skip a note that is plainly on the page and left the
-            # measures short, so the work was dropped for not closing.
-            if code not in NOTE_CODES and code not in GRACE_CODES:
-                pending_marks = marks
-                continue
-        if code in GRACE_CODES:
-            events.append({"name": fields[1].strip(), "duration": Fraction(0), "grace": True})
-            continue
-        if code not in NOTE_CODES:
-            continue
+
         numerator, denominator = fields[2].strip(), fields[3].strip()
-        if not (numerator.isdigit() and denominator.isdigit()):
+        sounds = (
+            code in NOTE_CODES
+            and numerator.isdigit()
+            and denominator.isdigit()
+            and int(numerator)
+            and int(denominator)
+        )
+        # What makes a row a marker is that it carries a mark and no note --
+        # not its code, because a bare repeat sign is often written with a note
+        # code and every note field left empty. Going by the code alone loses
+        # those signs entirely; going by the mark alone threw away the 18,265
+        # notes that share their row with one, across 1,617 of the 2,200 works,
+        # which taught the model to skip a note plainly on the page and left the
+        # measures short so the work was dropped for not closing.
+        if marks and not sounds and code not in GRACE_CODES:
+            pending_marks = marks
             continue
-        if not int(numerator) or not int(denominator):
+        if code in GRACE_CODES:
+            grace = {"name": fields[1].strip(), "duration": Fraction(0), "grace": True}
+            if marks:
+                grace["open"], grace["close"] = marks
+            events.append(grace)
+            continue
+        if not sounds:
             continue
         event = {
             "name": fields[1].strip(),
