@@ -11,6 +11,12 @@ how each symbol fares individually, and what it gets confused with.
 Reports, for every branch, per-class recall and precision, and for the
 accidentals also the confusions that actually happen. Symbols the model drops
 or invents are counted separately, since not losing symbols is the priority.
+
+Per-branch figures flatter the model, though: they ask whether the duration was
+right and, separately, whether the pitch was right. A player hears neither in
+isolation -- a note is right only when its duration, its pitch and its
+accidental are all right at once. The last section reports that joint figure,
+per note and per staff.
 """
 
 import argparse
@@ -69,11 +75,18 @@ def evaluate(checkpoint: str | None, limit: int | None, batch_size: int) -> None
     truth: dict[str, collections.Counter] = {b: collections.Counter() for b in BRANCHES}
     guessed: dict[str, collections.Counter] = {b: collections.Counter() for b in BRANCHES}
     confusion: collections.Counter = collections.Counter()
+    joint: collections.Counter = collections.Counter()
+    staff_errors: list[int] = []
 
     names = {
         branch: {index: token for token, index in vocab.items()}
         for branch, vocab in _vocabularies(config).items()
     }
+    # Rests, barlines and clefs are symbols too, but only these carry a pitch a
+    # listener would notice going wrong.
+    note_indices = [
+        index for token, index in config.rhythm_vocab.items() if token.startswith("note")
+    ]
 
     with torch.no_grad():
         for batch in loader:
@@ -89,6 +102,7 @@ def evaluate(checkpoint: str | None, limit: int | None, batch_size: int) -> None
             )
             logits = outputs["logits"]
             eval_mask = batch["mask"][:, 1:]
+            step: dict[str, tuple] = {}
             for branch, branch_logits in zip(BRANCHES, logits):
                 labels = batch[
                     {"rhythm": "rhythms", "pitch": "pitchs", "lift": "lifts",
@@ -98,6 +112,7 @@ def evaluate(checkpoint: str | None, limit: int | None, batch_size: int) -> None
                 length = min(preds.shape[1], labels.shape[1], eval_mask.shape[1])
                 preds, labels = preds[:, :length], labels[:, :length]
                 mask = (labels != -100) & eval_mask[:, :length]
+                step[branch] = (preds, labels)
                 for predicted, actual in zip(preds[mask].tolist(), labels[mask].tolist()):
                     truth[branch][actual] += 1
                     guessed[branch][predicted] += 1
@@ -105,6 +120,30 @@ def evaluate(checkpoint: str | None, limit: int | None, batch_size: int) -> None
                         hits[branch][actual] += 1
                     elif branch == "lift":
                         confusion[(actual, predicted)] += 1
+
+            # A symbol is only usable if every branch got it right at once.
+            width = min(step[branch][0].shape[1] for branch in BRANCHES)
+            rhythm_labels = step["rhythm"][1][:, :width]
+            here = eval_mask[:, :width] & (rhythm_labels != -100)
+            agree = torch.ones_like(here)
+            for branch in BRANCHES:
+                preds, labels = step[branch]
+                agree &= preds[:, :width] == labels[:, :width]
+            sounds = torch.zeros_like(here)
+            for index in note_indices:
+                sounds |= rhythm_labels == index
+            pitch_preds, pitch_labels = step["pitch"]
+            lift_preds, lift_labels = step["lift"]
+            audible = (pitch_preds[:, :width] == pitch_labels[:, :width]) & (
+                lift_preds[:, :width] == lift_labels[:, :width]
+            )
+
+            joint["symbols"] += int(here.sum())
+            joint["symbols_ok"] += int((agree & here).sum())
+            joint["notes"] += int((sounds & here).sum())
+            joint["notes_ok"] += int((agree & sounds & here).sum())
+            joint["notes_audible_ok"] += int((audible & sounds & here).sum())
+            staff_errors += (((~agree) & here).sum(dim=1)).tolist()
 
     for branch in BRANCHES:
         total = sum(truth[branch].values())
@@ -150,6 +189,41 @@ def evaluate(checkpoint: str | None, limit: int | None, batch_size: int) -> None
     eprint(f"   invented (blank read as): {invented}")
     if real:
         eprint(f"   caught                  : {100 * (real - dropped) / real:.1f}%")
+
+    if joint["symbols"]:
+        perfect = sum(1 for count in staff_errors if count == 0)
+        near = sum(1 for count in staff_errors if count <= 1)
+        errors = sum(staff_errors)
+        eprint("\n=== everything right at once ===")
+        eprint(
+            f"   notes with duration, pitch and accidental all correct : "
+            f"{joint['notes_ok']}/{joint['notes']} = "
+            f"{100 * joint['notes_ok'] / joint['notes']:.1f}%"
+        )
+        eprint(
+            f"   notes a listener would hear correctly (pitch+accidental): "
+            f"{joint['notes_audible_ok']}/{joint['notes']} = "
+            f"{100 * joint['notes_audible_ok'] / joint['notes']:.1f}%"
+        )
+        eprint(
+            f"   symbols of every kind fully correct                    : "
+            f"{joint['symbols_ok']}/{joint['symbols']} = "
+            f"{100 * joint['symbols_ok'] / joint['symbols']:.1f}%"
+        )
+        eprint(
+            f"   staffs with no mistake at all                          : "
+            f"{perfect}/{len(staff_errors)} = "
+            f"{100 * perfect / len(staff_errors):.1f}%"
+        )
+        eprint(
+            f"   staffs with at most one mistake                        : "
+            f"{near}/{len(staff_errors)} = "
+            f"{100 * near / len(staff_errors):.1f}%"
+        )
+        eprint(
+            f"   mistakes per staff, on average                         : "
+            f"{errors / len(staff_errors):.2f}"
+        )
 
 
 def lift_is_symbol(name: str) -> bool:
