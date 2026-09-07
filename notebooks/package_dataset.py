@@ -6,7 +6,8 @@ sources. Unpacking is roughly fifteen times quicker.
 
     python -m notebooks.package_dataset
 
-Writes symbtr_veri.tar.gz next to the repository. Paths inside the archive are
+Writes symbtr_veri.tar.gz into the colab folder beside the repository, where
+the run logs and evaluations also live. Paths inside the archive are
 relative to the repository root, so extracting it into a fresh clone puts every
 file exactly where the index files expect it.
 """
@@ -29,6 +30,7 @@ git_root = Path(__file__).parent.parent.absolute()
 
 
 def package(destination: str) -> None:
+    os.makedirs(os.path.dirname(os.path.abspath(destination)), exist_ok=True)
     if not os.path.isdir(working_dir):
         eprint(f"Nothing to package: {working_dir} does not exist.")
         eprint("Run python -m training.datasets.convert_symbtr first.")
@@ -62,7 +64,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--out",
-        default=str(git_root.parent / "symbtr_veri.tar.gz"),
+        default=str(git_root.parent / "colab" / "symbtr_veri.tar.gz"),
         help="Where to write the archive.",
     )
     package(parser.parse_args().out)
