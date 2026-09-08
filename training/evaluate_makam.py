@@ -412,7 +412,8 @@ def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
     loader = torch.utils.data.DataLoader(data["validation"], batch_size=1, shuffle=False)
 
     total = substitutions = deletions = insertions = 0
-    notes = notes_ok = 0
+    notes = notes_ok = usable_ok = 0
+    staff_misreads: list[int] = []
     accidental_truth: collections.Counter = collections.Counter()
     accidental_hit: collections.Counter = collections.Counter()
     accidental_said: collections.Counter = collections.Counter()
@@ -433,18 +434,31 @@ def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
 
             staffs += 1
             mistakes = 0
+            misreads = 0
             for actual, predicted in pairs:
                 if actual is None:
                     insertions += 1
                     mistakes += 1
+                    misreads += 1
                     continue
                 total += 1
                 if predicted is None:
                     deletions += 1
                     mistakes += 1
+                    misreads += 1
                 elif actual != predicted:
                     substitutions += 1
                     mistakes += 1
+                    # A barline or repeat sign fills its other four columns with
+                    # the not-applicable marker. Getting the symbol right and
+                    # the marker wrong is a matter of form, and nothing
+                    # downstream reads those columns.
+                    if has_rhythm_symbol_a_position(actual[0]) or actual[0] != predicted[0]:
+                        misreads += 1
+                    else:
+                        usable_ok += 1
+                else:
+                    usable_ok += 1
                 if actual[0].startswith("note"):
                     notes += 1
                     if actual == predicted:
@@ -457,6 +471,7 @@ def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
                     accidental_said[predicted[2]] += 1
             if not mistakes:
                 clean_staffs += 1
+            staff_misreads.append(misreads)
 
     if not total:
         eprint("Nothing to score")
@@ -473,6 +488,14 @@ def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
     if notes:
         eprint(f"   notes fully correct     : {notes_ok}/{notes} = {100 * notes_ok / notes:.1f}%")
     eprint(f"   staffs with no mistake  : {clean_staffs}/{staffs} = {100 * clean_staffs / staffs:.1f}%")
+
+    clean = sum(1 for count in staff_misreads if count == 0)
+    eprint("\n   ignoring the not-applicable marker on barlines and repeats:")
+    eprint(f"   symbols read correctly  : {usable_ok}/{total} = {100 * usable_ok / total:.1f}%")
+    eprint(f"   staffs with no mistake  : {clean}/{staffs} = {100 * clean / staffs:.1f}%")
+    eprint(
+        f"   mistakes per staff      : {sum(staff_misreads) / staffs:.2f}"
+    )
 
     if accidental_truth:
         eprint("\n=== accidentals, reading on its own ===")
