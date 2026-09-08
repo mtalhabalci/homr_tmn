@@ -205,9 +205,9 @@ def evaluate(
             precision = 100 * got / said if said else 0.0
             eprint(f"{name:<22}{seen:>9}{got:>8}{recall:>8.1f}%{precision:>10.1f}%")
 
+    lift_names = names["lift"]
     if confusion:
         eprint("\n=== accidentals: what is mistaken for what ===")
-        lift_names = names["lift"]
         for (actual, predicted), count in confusion.most_common(15):
             eprint(
                 f"   {lift_names.get(actual, actual):<12} read as "
@@ -216,13 +216,20 @@ def evaluate(
 
     # Symbols dropped or invented, the measure that matters most here.
     empty_index = config.lift_vocab.get("_")
+    # Only rows that can carry an accidental count. A barline's lift column
+    # holds the not-applicable mark, and reading that as blank is not a lost
+    # accidental -- counting it as one hid the real figure behind the number of
+    # barlines, which grew when the repeat signs came back.
+    accidental = {
+        index for index in truth["lift"] if lift_is_symbol(lift_names.get(index, ""))
+    }
     dropped = sum(
         count for (actual, predicted), count in confusion.items()
-        if predicted == empty_index and actual != empty_index
+        if predicted == empty_index and actual in accidental
     )
     invented = sum(
         count for (actual, predicted), count in confusion.items()
-        if actual == empty_index and predicted != empty_index
+        if actual == empty_index and predicted in accidental
     )
     real = sum(
         seen for index, seen in truth["lift"].items()

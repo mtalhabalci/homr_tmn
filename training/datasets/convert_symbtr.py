@@ -211,7 +211,7 @@ def read_mu2(path: str) -> Mu2Score:
         raise SkippedWork("no time signature in the .mu2 header")
     key = ""
     events: list[dict] = []
-    pending_marks: tuple[str | None, str | None] | None = None
+    pending_open: str | None = None
     for line in lines[1:]:
         fields = line.split("\t")
         if len(fields) < 9:
@@ -241,7 +241,17 @@ def read_mu2(path: str) -> Mu2Score:
         # which taught the model to skip a note plainly on the page and left the
         # measures short so the work was dropped for not closing.
         if marks and not sounds and code not in GRACE_CODES:
-            pending_marks = marks
+            open_mark, close_mark = marks
+            if close_mark and events:
+                # A closing sign ends the section it follows, so it belongs to
+                # the note before it. Carrying it forward like an opening put it
+                # one measure late, and a second marker row right after -- the
+                # usual "end this repeat, start the next" pair -- overwrote it
+                # outright. Between them the model saw repeatEnd on the wrong
+                # barline more often than the right one and never learned it.
+                events[-1]["close"] = close_mark
+            if open_mark:
+                pending_open = open_mark
             continue
         if code in GRACE_CODES:
             grace = {"name": fields[1].strip(), "duration": Fraction(0), "grace": True}
@@ -249,6 +259,7 @@ def read_mu2(path: str) -> Mu2Score:
                 grace["open"], grace["close"] = marks
             events.append(grace)
             continue
+
         if not sounds:
             continue
         event = {
@@ -256,12 +267,11 @@ def read_mu2(path: str) -> Mu2Score:
             "duration": Fraction(int(numerator), int(denominator)),
             "grace": False,
         }
-        if pending_marks or marks:
-            before = pending_marks or (None, None)
+        if pending_open or marks:
             here = marks or (None, None)
-            event["open"] = before[0] or here[0]
-            event["close"] = before[1] or here[1]
-            pending_marks = None
+            event["open"] = pending_open or here[0]
+            event["close"] = here[1]
+            pending_open = None
         events.append(event)
     if not events:
         raise SkippedWork("no notes in the .mu2")
