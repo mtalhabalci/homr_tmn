@@ -106,6 +106,12 @@ def evaluate(
     truth: dict[str, collections.Counter] = {b: collections.Counter() for b in BRANCHES}
     guessed: dict[str, collections.Counter] = {b: collections.Counter() for b in BRANCHES}
     confusion: collections.Counter = collections.Counter()
+    # An accidental is the same shape wherever it sits, but the model only ever
+    # meets some of them on one degree of the staff: 752 of the 758 five-comma
+    # sharps in training are on F5. Splitting recall by the note underneath says
+    # whether a weak class is genuinely unread or only unread where it is scarce.
+    by_pitch: collections.Counter = collections.Counter()
+    by_pitch_hit: collections.Counter = collections.Counter()
     joint: collections.Counter = collections.Counter()
     staff_errors: list[int] = []
     staff_misreads: list[int] = []
@@ -176,6 +182,20 @@ def evaluate(
                         hits[branch][actual] += 1
                     elif branch == "lift":
                         confusion[(actual, predicted)] += 1
+
+            lift_preds, lift_labels_all = step["lift"]
+            pitch_preds_all, pitch_labels_all = step["pitch"]
+            span = min(lift_preds.shape[1], pitch_labels_all.shape[1], eval_mask.shape[1])
+            valid = eval_mask[:, :span] & (lift_labels_all[:, :span] != -100)
+            for row, column in valid.nonzero(as_tuple=False).tolist():
+                actual = int(lift_labels_all[row][column])
+                name = names["lift"].get(actual, "")
+                if not lift_is_symbol(name):
+                    continue
+                pitch = names["pitch"].get(int(pitch_labels_all[row][column]), "?")
+                by_pitch[(name, pitch)] += 1
+                if int(lift_preds[row][column]) == actual:
+                    by_pitch_hit[(name, pitch)] += 1
 
             # A symbol is only usable if every branch got it right at once.
             width = min(step[branch][0].shape[1] for branch in BRANCHES)
@@ -259,6 +279,28 @@ def evaluate(
     eprint(f"   invented (blank read as): {invented}")
     if real:
         eprint(f"   caught                  : {100 * (real - dropped) / real:.1f}%")
+
+    weak = sorted(
+        {
+            name
+            for (name, _), seen in by_pitch.items()
+            if sum(v for (n, _), v in by_pitch.items() if n == name)
+            and sum(v for (n, _), v in by_pitch_hit.items() if n == name)
+            / sum(v for (n, _), v in by_pitch.items() if n == name)
+            < 0.95
+        }
+    )
+    if weak:
+        eprint("\n=== the weak accidentals, split by the note underneath ===")
+        for name in weak:
+            eprint(f"   {name}")
+            rows = sorted(
+                ((pitch, seen) for (n, pitch), seen in by_pitch.items() if n == name),
+                key=lambda item: -item[1],
+            )
+            for pitch, seen in rows:
+                got = by_pitch_hit[(name, pitch)]
+                eprint(f"      {pitch:<5}{got:>5}/{seen:<5}{100 * got / seen:>7.1f}%")
 
     if joint["symbols"]:
         perfect = sum(1 for count in staff_errors if count == 0)
