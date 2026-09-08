@@ -105,6 +105,13 @@ RARE_LIFTS = ("sharp5", "sharp2", "sharp8", "flat8")
 # near this figure with 1133 examples and reaches 81% recall, which is what the
 # target is calibrated on.
 RARE_LIFT_TARGET = 1500
+# A sign is the same shape wherever it sits on the staff, but the model does not
+# learn it that way: it meets the five-comma sharp 752 times on F5 and six times
+# on F4, and reads it at 89% on the first and 54% on the second. The three-comma
+# flat, with half as many examples spread over five degrees, reaches 98%. So the
+# spread matters more than the count, and a scarce (sign, degree) pair is topped
+# up as well as a scarce sign.
+RARE_PITCH_TARGET = 200
 MAX_REPEATS = 8
 VAL_FRACTION = 0.1
 TEST_FRACTION = 0.1
@@ -754,8 +761,12 @@ def _work_of(line: str) -> str:
     return _STAFF_SUFFIX.sub("", os.path.basename(line.strip().split(",")[0]))
 
 
-def _lift_counts(line: str) -> collections.Counter:
-    """How many of each drawn accidental one staff carries."""
+def _lift_counts(line: str, by_pitch: bool = False) -> collections.Counter:
+    """How many of each drawn accidental one staff carries.
+
+    With by_pitch the key is the sign together with the note it sits on, which
+    is the grain the model actually learns at.
+    """
     token_path = git_root / line.strip().split(",")[1]
     if not token_path.exists():
         return collections.Counter()
@@ -763,41 +774,57 @@ def _lift_counts(line: str) -> collections.Counter:
     for token_line in token_path.read_text(encoding="utf-8").splitlines():
         parts = token_line.split()
         if len(parts) == 5 and parts[2] not in (".", "_"):
-            counts[parts[2]] += 1
+            counts[(parts[2], parts[1]) if by_pitch else parts[2]] += 1
     return counts
 
 
-def _oversample(train: list[str], rng: random.Random) -> list[str]:
-    """Repeat scarce staffs one at a time, stopping at RARE_LIFT_TARGET.
+def _top_up(
+    train: list[str],
+    extra: list[str],
+    rng: random.Random,
+    by_pitch: bool,
+    target: int,
+) -> None:
+    """Repeat scarce staffs one at a time until every key reaches target.
 
-    Works the classes from rarest upwards and keeps a running tally, so a staff
-    repeated for one accidental also counts towards every other accidental it
-    carries. MAX_REPEATS bounds a class too scarce to reach the target at all.
+    Works from rarest upwards and keeps a running tally, so a staff repeated for
+    one accidental also counts towards every other it carries. MAX_REPEATS bounds
+    a key too scarce to reach the target at all.
     """
-    per_line = {line: _lift_counts(line) for line in train}
+    per_line = {line: _lift_counts(line, by_pitch) for line in set(train + extra)}
     running: collections.Counter = collections.Counter()
-    for line in train:
+    for line in train + extra:
         running.update(per_line[line])
 
-    extra: list[str] = []
-    for lift in sorted(running, key=lambda name: running[name]):
-        if running[lift] >= RARE_LIFT_TARGET:
+    for key in sorted(running, key=lambda name: running[name]):
+        if running[key] >= target:
             continue
-        carriers = [line for line in train if per_line[line][lift]]
+        carriers = [line for line in train if per_line[line][key]]
         if not carriers:
             continue
         rng.shuffle(carriers)
         budget = len(carriers) * (MAX_REPEATS - 1)
         added = 0
-        while running[lift] < RARE_LIFT_TARGET and added < budget:
+        while running[key] < target and added < budget:
             line = carriers[added % len(carriers)]
             extra.append(line)
             running.update(per_line[line])
             added += 1
-        eprint(
-            f"  {lift}: {added} extra staffs -> {running[lift]} occurrences"
-            + ("" if running[lift] >= RARE_LIFT_TARGET else " (ran out of staffs)")
-        )
+        if added:
+            label = f"{key[0]} on {key[1]}" if by_pitch else str(key)
+            eprint(
+                f"  {label}: {added} extra staffs -> {running[key]} occurrences"
+                + ("" if running[key] >= target else " (ran out of staffs)")
+            )
+
+
+def _oversample(train: list[str], rng: random.Random) -> list[str]:
+    """Top scarce signs up, then scarce sign-and-degree pairs."""
+    extra: list[str] = []
+    eprint(f"Topping scarce accidentals up to {RARE_LIFT_TARGET} occurrences:")
+    _top_up(train, extra, rng, by_pitch=False, target=RARE_LIFT_TARGET)
+    eprint(f"Topping scarce sign-and-degree pairs up to {RARE_PITCH_TARGET}:")
+    _top_up(train, extra, rng, by_pitch=True, target=RARE_PITCH_TARGET)
     return extra
 
 
@@ -854,7 +881,6 @@ def split_and_balance(lines: list[str], seed: int = 0) -> dict[str, list[str]]:
         return [line for name in names for line in works[name]]
 
     train = collect(train_works)
-    eprint(f"Topping scarce accidentals up to {RARE_LIFT_TARGET} occurrences:")
     train += _oversample(train, rng)
     rng.shuffle(train)
     return {"train": train, "val": collect(val_works), "test": collect(test_works)}
