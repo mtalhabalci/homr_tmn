@@ -44,6 +44,7 @@ import torch
 
 from homr.simple_logging import eprint
 from homr.transformer.configs import Config
+from homr.transformer.vocabulary import has_rhythm_symbol_a_position
 from training.architecture.transformer.tromr_arch import TrOMR, load_model
 from training.datasets.convert_symbtr import symbtr_test_index
 from training.transformer.data_loader import load_dataset
@@ -107,6 +108,7 @@ def evaluate(
     confusion: collections.Counter = collections.Counter()
     joint: collections.Counter = collections.Counter()
     staff_errors: list[int] = []
+    staff_misreads: list[int] = []
 
     names = {
         branch: {index: token for token, index in vocab.items()}
@@ -116,6 +118,15 @@ def evaluate(
     # listener would notice going wrong.
     note_indices = [
         index for token, index in config.rhythm_vocab.items() if token.startswith("note")
+    ]
+    # A barline or a repeat sign fills its remaining four columns with the
+    # not-applicable marker. Reproducing that marker is a matter of form, not of
+    # reading the page, and nothing downstream looks at those columns -- so for
+    # these rows only the symbol itself is judged.
+    carries_detail = [
+        index
+        for token, index in config.rhythm_vocab.items()
+        if has_rhythm_symbol_a_position(token)
     ]
 
     lift_remap = None
@@ -177,6 +188,11 @@ def evaluate(
             sounds = torch.zeros_like(here)
             for index in note_indices:
                 sounds |= rhythm_labels == index
+            detailed = torch.zeros_like(here)
+            for index in carries_detail:
+                detailed |= rhythm_labels == index
+            rhythm_preds = step["rhythm"][0][:, :width]
+            usable = torch.where(detailed, agree, rhythm_preds == rhythm_labels)
             pitch_preds, pitch_labels = step["pitch"]
             lift_preds, lift_labels = step["lift"]
             audible = (pitch_preds[:, :width] == pitch_labels[:, :width]) & (
@@ -185,6 +201,8 @@ def evaluate(
 
             joint["symbols"] += int(here.sum())
             joint["symbols_ok"] += int((agree & here).sum())
+            joint["usable_ok"] += int((usable & here).sum())
+            staff_misreads += (((~usable) & here).sum(dim=1)).tolist()
             joint["notes"] += int((sounds & here).sum())
             joint["notes_ok"] += int((agree & sounds & here).sum())
             joint["notes_audible_ok"] += int((audible & sounds & here).sum())
@@ -275,6 +293,24 @@ def evaluate(
         eprint(
             f"   mistakes per staff, on average                         : "
             f"{errors / len(staff_errors):.2f}"
+        )
+        clean = sum(1 for count in staff_misreads if count == 0)
+        eprint(
+            f"\n   ignoring the not-applicable marker on barlines and repeats:"
+        )
+        eprint(
+            f"   symbols read correctly                                 : "
+            f"{joint['usable_ok']}/{joint['symbols']} = "
+            f"{100 * joint['usable_ok'] / joint['symbols']:.1f}%"
+        )
+        eprint(
+            f"   staffs with no mistake at all                          : "
+            f"{clean}/{len(staff_misreads)} = "
+            f"{100 * clean / len(staff_misreads):.1f}%"
+        )
+        eprint(
+            f"   mistakes per staff, on average                         : "
+            f"{sum(staff_misreads) / len(staff_misreads):.2f}"
         )
 
 
