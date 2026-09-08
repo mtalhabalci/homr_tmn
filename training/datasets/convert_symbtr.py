@@ -636,8 +636,13 @@ def _staff_tokens(
     for entry in (part.strip() for part in score.key.split("/")):
         pitch = parse_note_name(entry) if entry else None
         if pitch:
+            # The signature is engraved under the same rounding as everything
+            # else, so a 2-comma entry is drawn with the 1-comma sign. Labelling
+            # it 2 asked the model to tell two works apart by a glyph they
+            # share, once per staff, for the whole piece.
+            shown = state.rounding.get(pitch[1], pitch[1])
             tokens.append(
-                EncodedSymbol(key_accidental, pitch[0], lift_for_commas(pitch[1]), "_", "upper")
+                EncodedSymbol(key_accidental, pitch[0], lift_for_commas(shown), "_", "upper")
             )
     if is_first_staff:
         tokens.append(EncodedSymbol(f"timeSignature_{score.numerator}/{score.denominator}"))
