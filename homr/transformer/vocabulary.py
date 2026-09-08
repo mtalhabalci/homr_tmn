@@ -415,6 +415,12 @@ class EncodedSymbol:
         # this ordering can be used to reject cases where attention-based coordinates
         # violate monotonic scan constraints and are therefore unreliable.
         self.coordinates = coordinates
+        # What the note sounds, as opposed to what is printed on it. A makam
+        # score leaves four of every five alterations to the key signature and
+        # the measure's memory, so the printed symbol alone does not give the
+        # pitch. homr.makam_key fills this in; MusicXML's <alter> reads it while
+        # <accidental> keeps to the drawn symbol.
+        self.sounding: str | None = None
         self._duration: SymbolDuration | None = None
 
     def is_control_symbol(self) -> bool:
@@ -441,6 +447,11 @@ class EncodedSymbol:
         result = copy.copy(self)
         result.rhythm = match[1] + "_" + str(duration) + match[3]
         result._duration = None
+        return result
+
+    def with_sounding(self, lift: str) -> "EncodedSymbol":
+        result = copy.copy(self)
+        result.sounding = lift
         return result
 
     def change_lift(self, lift: str) -> "EncodedSymbol":

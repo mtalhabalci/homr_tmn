@@ -150,12 +150,11 @@ def maintain_accidentals_during_measure(
             key = key.reset_at_end_of_measure()
             results.append(symbol)
         elif symbol.lift in aeu_accidentals:
-            # Provisional: pass makam accidentals through untouched. The Western
-            # circle-of-fifths bookkeeping below cannot represent a makam
-            # signature, so applying it here would be worse than doing nothing.
-            # This holds while every altered note is engraved explicitly; once a
-            # makam-aware resolver exists (key signature + measure memory, driven
-            # by the keyAccidental tokens) this branch must defer to it instead.
+            # Makam accidentals pass through untouched. The circle of fifths
+            # cannot hold a makam signature -- it is one number from -7 to 7 --
+            # and this function serves the PrIMuS converter, whose scores have
+            # no makam accidentals in them. The makam signature and the measure
+            # memory are handled by homr.makam_key on the way to MusicXML.
             results.append(symbol)
         elif symbol.lift != nonote:
             # In engraving, the lift may be empty (implied by key signature or previous accidental)

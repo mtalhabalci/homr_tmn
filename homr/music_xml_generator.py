@@ -7,6 +7,7 @@ import musicxml.xmlelement.xmlelement as mxl
 import numpy as np
 
 from homr import constants
+from homr.makam_key import resolve_sounding
 from homr.simple_logging import eprint
 from homr.transformer.vocabulary import (
     EncodedSymbol,
@@ -132,7 +133,9 @@ def generate_xml(
     has_two_staves_by_part = [_voice_has_two_staves(staff) for staff in staffs]
     root.add_child(build_part_list(has_two_staves_by_part))
     for index, staff in enumerate(staffs):
-        root.add_child(build_part(args, staff, index, has_two_staves_by_part[index]))
+        root.add_child(
+            build_part(args, resolve_sounding(staff), index, has_two_staves_by_part[index])
+        )
     return root
 
 
@@ -687,10 +690,16 @@ def build_note_or_rest(
         pitch.add_child(mxl.XMLOctave(value_=int(model_pitch[1])))
         if model_note.lift == nonote:
             eprint("WARNING note with invalid lift", model_note)
-        elif model_note.lift != empty:
-            alter_value = LIFT_TO_ALTER.get(model_note.lift)
-            if alter_value is not None:
-                pitch.add_child(mxl.XMLAlter(value_=alter_value))
+        else:
+            # <alter> is the sounding pitch, and on a makam page most of it is
+            # implied by the key signature and the measure rather than printed
+            # on the note. homr.makam_key works that out; without it every note
+            # the signature covers came out unaltered.
+            sounding = model_note.sounding if model_note.sounding is not None else model_note.lift
+            if sounding != empty:
+                alter_value = LIFT_TO_ALTER.get(sounding)
+                if alter_value is not None:
+                    pitch.add_child(mxl.XMLAlter(value_=alter_value))
         note.add_child(pitch)
         # Emit an explicit <accidental> for the makam glyphs so the renderer
         # (e.g. MuseScore) draws the correct microtonal symbol.
