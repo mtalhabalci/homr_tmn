@@ -252,8 +252,21 @@ def build_measures(
             build_barline_ending(symbol, barline, volta_number)
         elif rhythm.startswith(("voltaStop", "voltaDiscontinue")):
             volta_number = state.stop_volta(measure_number)
-            barline = build_or_get_barline(current_measure, "right")
-            build_barline_ending(symbol, barline, volta_number)
+            # Two conventions meet here. A MusicXML source names the barline and
+            # then the ending on it, so by now the measure has already closed and
+            # the ending belongs to the one before. A Mus2 score draws the ending
+            # bracket as the barline, so nothing has closed yet and this symbol
+            # is what closes it -- without that, the next ending landed in the
+            # same measure and MusicXML allows a barline only one.
+            if current_measure.get_children():
+                barline = build_or_get_barline(current_measure, "right")
+                build_barline_ending(symbol, barline, volta_number)
+                close_current_measure()
+                measure_number += 1
+                current_measure = mxl.XMLMeasure(number=str(measure_number))
+            elif measures:
+                barline = build_or_get_barline(measures[-1], "right")
+                build_barline_ending(symbol, barline, volta_number)
         else:
             eprint("Symbol isn't supported yet ", symbol)
 
@@ -507,6 +520,9 @@ def build_barline_style(barline: EncodedSymbol, xml: mxl.XMLBarline) -> None:
 
 
 def build_barline_ending(volta: EncodedSymbol, xml: mxl.XMLBarline, volta_number: int) -> None:
+    if len(xml.get_children_of_type(mxl.XMLEnding)) > 0:
+        eprint("barline already has an ending")
+        return
     if volta.rhythm.startswith("voltaStart"):
         ending = mxl.XMLEnding(type="start", number=str(volta_number))
     elif volta.rhythm.startswith("voltaStop"):
