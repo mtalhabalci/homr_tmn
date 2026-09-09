@@ -9,6 +9,7 @@ how each symbol fares individually, and what it gets confused with.
     python -m training.evaluate_makam --checkpoint path/to/model.pth --limit 300
     python -m training.evaluate_makam --checkpoint <the western .pth> --lenient
     python -m training.evaluate_makam --checkpoint path/to/model.pth --generate
+    python -m training.evaluate_makam --index datasets/SymbTr-shifted/index_shift-2.txt
 
 Reports, for every branch, per-class recall and precision, and for the
 accidentals also the confusions that actually happen. Symbols the model drops
@@ -75,7 +76,11 @@ def _vocabularies(config: Config) -> dict[str, dict[str, int]]:
 
 
 def evaluate(
-    checkpoint: str | None, limit: int | None, batch_size: int, lenient: bool = False
+    checkpoint: str | None,
+    limit: int | None,
+    batch_size: int,
+    lenient: bool = False,
+    index: str | None = None,
 ) -> None:
     config = Config()
     if checkpoint:
@@ -83,15 +88,16 @@ def evaluate(
     if not os.path.exists(config.filepaths.checkpoint):
         eprint(f"No checkpoint at {config.filepaths.checkpoint}")
         sys.exit(1)
-    if not os.path.exists(symbtr_test_index):
-        eprint(f"No test index at {symbtr_test_index}. Run convert_symbtr first.")
+    chosen = index or symbtr_test_index
+    if not os.path.exists(chosen):
+        eprint(f"No test index at {chosen}. Run convert_symbtr first.")
         sys.exit(1)
 
-    with open(symbtr_test_index, encoding="utf-8") as handle:
+    with open(chosen, encoding="utf-8") as handle:
         samples = [line for line in handle if line.strip()]
     if limit:
         samples = samples[:limit]
-    eprint(f"Evaluating {len(samples)} staff samples from {symbtr_test_index}")
+    eprint(f"Evaluating {len(samples)} staff samples from {chosen}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_model(config)
@@ -423,7 +429,9 @@ def _symbols_from_batch(
     return symbols
 
 
-def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
+def evaluate_generated(
+    checkpoint: str | None, limit: int | None, index: str | None = None
+) -> None:
     """Score the model reading each staff on its own, with nothing fed back."""
     config = Config()
     if checkpoint:
@@ -432,11 +440,12 @@ def evaluate_generated(checkpoint: str | None, limit: int | None) -> None:
         eprint(f"No checkpoint at {config.filepaths.checkpoint}")
         sys.exit(1)
 
-    if not os.path.exists(symbtr_test_index):
-        eprint(f"No test index at {symbtr_test_index}. Unpack the dataset first.")
+    chosen = index or symbtr_test_index
+    if not os.path.exists(chosen):
+        eprint(f"No test index at {chosen}. Unpack the dataset first.")
         sys.exit(1)
 
-    with open(symbtr_test_index, encoding="utf-8") as handle:
+    with open(chosen, encoding="utf-8") as handle:
         samples = [line for line in handle if line.strip()]
     if limit:
         samples = samples[:limit]
@@ -562,6 +571,11 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=None, help="Use only N staffs.")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument(
+        "--index",
+        default=None,
+        help="Score this list of staffs instead of the usual test split.",
+    )
+    parser.add_argument(
         "--generate",
         action="store_true",
         help="Let the model read each staff on its own instead of feeding it the "
@@ -575,6 +589,12 @@ if __name__ == "__main__":
     )
     options = parser.parse_args()
     if options.generate:
-        evaluate_generated(options.checkpoint, options.limit)
+        evaluate_generated(options.checkpoint, options.limit, options.index)
     else:
-        evaluate(options.checkpoint, options.limit, options.batch_size, options.lenient)
+        evaluate(
+            options.checkpoint,
+            options.limit,
+            options.batch_size,
+            options.lenient,
+            options.index,
+        )
