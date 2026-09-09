@@ -154,27 +154,22 @@ XMLStaff(value: 2),
 XMLNotations()])])])])"""
         self.assertEqual(self._norm_expected(expected), actual)
 
-    def test_strip_articulations(self) -> None:
-        chord = SymbolChord(
-            [
-                EncodedSymbol("note_8", articulation="staccatissimo"),
-                EncodedSymbol("note_16", articulation="tieStart_slurStop_tenuto"),
-                EncodedSymbol("note_32", articulation="tieStart"),
-            ]
-        )
+    def test_a_tie_reaches_the_file(self) -> None:
+        """A note too long for one symbol is engraved as tied halves.
 
-        articulations, result = chord.strip_slur_ties()
-        self.assertEqual(
-            result.symbols,
-            (
-                [
-                    EncodedSymbol("note_8", articulation="staccatissimo"),
-                    EncodedSymbol("note_16", articulation="tenuto"),
-                    EncodedSymbol("note_32", articulation="_"),
-                ]
-            ),
-        )
-        self.assertEqual(articulations, ["slurStop", "tieStart"])
+        The two halves used to arrive as two separate notes, because ties were
+        stripped off before the note was written: the file then said two notes
+        where the page shows one held note.
+        """
+        held_note = """clef_G2 . . . upper
+note_2 E5 _ tieStart upper
+barline . . . .
+note_8 E5 _ tieStop upper
+barline . . . ."""
+        tokens = read_token_lines(held_note.splitlines())
+        xml = generate_xml(XmlGeneratorArguments(), [tokens], "").to_string()
+        self.assertIn('<tied type="start"', xml)
+        self.assertIn('<tied type="stop"', xml)
 
     def test_begin_chord_with_standalone_rests(self) -> None:
         """

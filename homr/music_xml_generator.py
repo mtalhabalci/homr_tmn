@@ -90,21 +90,6 @@ class SymbolChord:
             chords = (chords[1], chords[0])
         return [chord for chord in chords if len(chord.symbols) > 0]
 
-    def strip_slur_ties(self) -> tuple[list[str], "SymbolChord"]:
-        slurs_ties = set()
-
-        result = []
-        for symbol in self.symbols:
-            stripped, result_symbol = symbol.strip_articulations(
-                ["slurStart", "slurStop", "tieStart", "tieStop"]
-            )
-            result.append(result_symbol)
-            for articulation in stripped:
-                slurs_ties.add(articulation)
-
-        return sorted(slurs_ties), SymbolChord(result, tuplet_mark=self.tuplet_mark)
-
-
 class XmlGeneratorArguments:
     def __init__(
         self, large_page: bool | None = None, metronome: int | None = None, tempo: int | None = None
@@ -755,7 +740,11 @@ def build_multi_measure_rest(
 def build_note_chord(
     note_chord: SymbolChord, state: ConversionState, chord_duration: Fraction
 ) -> list[mxl.XMLElement]:
-    _slurs_ties, note_chord = note_chord.strip_slur_ties()
+    # Ties and slurs used to be stripped here and dropped on the floor. That
+    # matters for a makam score: a note too long for one symbol is engraved as
+    # tied halves, so the file came out with two notes where the page has one --
+    # 37 of them in a single sarki. Each note carries its own marking, which is
+    # what MusicXML expects of a chord as well.
     by_duration = _group_notes(note_chord.symbols)
     result: list[mxl.XMLElement] = []
     final_duration = Fraction(0)
