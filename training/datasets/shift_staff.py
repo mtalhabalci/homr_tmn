@@ -151,7 +151,13 @@ def render_shifted(stem: str, staff_index: int, steps: int, destination: str) ->
         gap = (bottom - top) / 4
         step = gap / 2
         band = fitz.Rect(0, top - MARGIN, page.rect.width, bottom + MARGIN)
-        offset = steps * step
+        # A pdf counts y downwards and a staff counts degrees upwards, so a
+        # note moved two degrees down is drawn two steps further down the page:
+        # the two signs are opposite. Getting this backwards moves the picture
+        # one way and its labels the other, and every pitch in the test is then
+        # wrong by four degrees -- which reads exactly like a model that cannot
+        # follow a sign off its usual line.
+        offset = -steps * step
 
         glyphs = _characters(page, band)
         if not glyphs:
