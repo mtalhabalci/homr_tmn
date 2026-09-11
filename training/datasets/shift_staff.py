@@ -114,24 +114,35 @@ def _face_for(faces, glyph):  # noqa: ANN001, ANN202
     return None
 
 
+def _in_band(item, band) -> bool:  # noqa: ANN001
+    points = [p for p in item[1:] if hasattr(p, "y")]
+    if not points:
+        box = item[1]
+        return band.y0 <= box.y0 <= band.y1 if hasattr(box, "y0") else False
+    return all(band.y0 - 2 <= point.y <= band.y1 + 2 for point in points)
+
+
 def _moved(point, dy):  # noqa: ANN001, ANN202
     import fitz  # noqa: PLC0415
 
     return fitz.Point(point.x, point.y + dy)
 
 
-def _drawing_offset(drawing, staff, band, offset):  # noqa: ANN001, ANN202
-    """How far this path moves: not at all, with the music, or not drawn again.
+def _holds_still(item, staff) -> bool:  # noqa: ANN001
+    """True for a staff line, which is the grid the music is read against.
 
-    Staff lines are the grid the music is read against, so they hold still. A
-    ledger line belongs to whichever note needed it, and after the shift that is
-    a different note, so the old one goes and fresh ones are drawn.
+    The decision has to be made for each line and not for the path it belongs
+    to: Mus2 draws all five lines of a staff as one path, so a path-level test
+    sees something 21 points tall, calls it music, and carries the whole staff
+    along with the notes. The notes then sit exactly where they sat before, the
+    pitch is unchanged, and only the labels have moved.
     """
-    box = drawing["rect"]
-    flat = box.height < 0.9
-    if flat and _is_staff_line((box.y0 + box.y1) / 2, staff):
-        return -band.y0
-    return -band.y0 + offset
+    if item[0] != "l":
+        return False
+    start, end = item[1], item[2]
+    if abs(start.y - end.y) >= 0.4:
+        return False
+    return _is_staff_line((start.y + end.y) / 2, staff)
 
 
 def render_shifted(stem: str, staff_index: int, steps: int, destination: str) -> bool:
@@ -174,7 +185,14 @@ def render_shifted(stem: str, staff_index: int, steps: int, destination: str) ->
                 return True
             return glyph["x"] < first_note and glyph["code"] not in ACCIDENTAL_GLYPHS
 
-        drawings = [d for d in page.get_drawings() if band.y0 <= d["rect"].y0 <= band.y1]
+        # A path counts if any of it falls in the band; its own items are
+        # filtered below. Testing the top edge alone dropped paths that begin
+        # higher up the page and reach down into this staff.
+        drawings = [
+            d
+            for d in page.get_drawings()
+            if d["rect"].y1 >= band.y0 and d["rect"].y0 <= band.y1
+        ]
 
         # get_fonts reports the subset name a pdf gives a font, "PBPBEM+Mus2";
         # the text itself reports the plain one, "Mus2". A page also carries
@@ -198,27 +216,32 @@ def render_shifted(stem: str, staff_index: int, steps: int, destination: str) ->
             faces.append((name, handle, fitz.Font(fontbuffer=buffer)))
 
         for drawing in drawings:
-            dy = _drawing_offset(drawing, staff, band, offset)
-            if dy is None:
-                continue  # a ledger line: the shifted notes get fresh ones
-            shape = canvas.new_shape()
+            still, moving = [], []
             for item in drawing["items"]:
-                if item[0] == "l":
-                    shape.draw_line(_moved(item[1], dy), _moved(item[2], dy))
-                elif item[0] == "c":
-                    shape.draw_bezier(*(_moved(point, dy) for point in item[1:5]))
-                elif item[0] == "re":
-                    box = item[1]
-                    shape.draw_rect(fitz.Rect(box.x0, box.y0 + dy, box.x1, box.y1 + dy))
-                elif item[0] == "qu":
-                    shape.draw_quad(item[1] + (0, dy))
-            shape.finish(
-                color=drawing.get("color"),
-                fill=drawing.get("fill"),
-                width=drawing.get("width") or 0.6,
-                closePath=drawing.get("closePath", False),
-            )
-            shape.commit()
+                if not _in_band(item, band):
+                    continue
+                (still if _holds_still(item, staff) else moving).append(item)
+            for items, dy in ((still, -band.y0), (moving, -band.y0 + offset)):
+                if not items:
+                    continue
+                shape = canvas.new_shape()
+                for item in items:
+                    if item[0] == "l":
+                        shape.draw_line(_moved(item[1], dy), _moved(item[2], dy))
+                    elif item[0] == "c":
+                        shape.draw_bezier(*(_moved(point, dy) for point in item[1:5]))
+                    elif item[0] == "re":
+                        box = item[1]
+                        shape.draw_rect(fitz.Rect(box.x0, box.y0 + dy, box.x1, box.y1 + dy))
+                    elif item[0] == "qu":
+                        shape.draw_quad(item[1] + (0, dy))
+                shape.finish(
+                    color=drawing.get("color"),
+                    fill=drawing.get("fill"),
+                    width=drawing.get("width") or 0.6,
+                    closePath=drawing.get("closePath", False),
+                )
+                shape.commit()
 
         for glyph in glyphs:
             move = 0 if stays(glyph) else offset
