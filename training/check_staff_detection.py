@@ -180,8 +180,32 @@ def to_width(
     return resized, [[(x * scale, y * scale) for x, y in staff] for staff in staffs]
 
 
-def compare(real: list[list[tuple[float, float]]], found: list) -> dict:
-    """Pair each detection with the real staff whose middle is nearest its own."""
+def page_image(
+    page: "fitz.Page", real: list, seed: int, photo: bool  # noqa: F821
+) -> tuple[np.ndarray, list[list[tuple[float, float]]]]:
+    """The page as homr will see it, and the corners of each real staff on it."""
+    render_width = PHOTO_WIDTH if photo else PAGE_WIDTH
+    zoom = render_width / page.rect.width
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+    image = np.frombuffer(pixmap.samples, np.uint8).reshape(
+        pixmap.height, pixmap.width, pixmap.n
+    )[..., :3][..., ::-1].copy()
+    staffs = [corners(staff, zoom) for staff in real]
+    if photo:
+        image, staffs = photograph(image, staffs, seed)
+    return to_width(image, staffs, PAGE_WIDTH)
+
+
+def page_seed(work: str, number: int) -> int:
+    return sum(ord(c) for c in work) * 100 + number
+
+
+def pair(real: list[list[tuple[float, float]]], found: list) -> tuple[dict[int, list[int]], int]:
+    """Give each detection to the real staff whose middle is nearest its own.
+
+    Returns the detections each real staff received, and how many detections
+    had no real staff within one staff height.
+    """
     middles = [np.mean([y for _, y in staff]) for staff in real]
     heights = [
         np.hypot(staff[3][0] - staff[0][0], staff[3][1] - staff[0][1]) for staff in real
@@ -195,6 +219,12 @@ def compare(real: list[list[tuple[float, float]]], found: list) -> dict:
             owner[nearest].append(number)
         else:
             stray += 1
+    return owner, stray
+
+
+def compare(real: list[list[tuple[float, float]]], found: list) -> dict:
+    """How the detections line up with the real staffs."""
+    owner, stray = pair(real, found)
     coverage = []
     for i, hits in owner.items():
         if hits:
@@ -266,17 +296,9 @@ def main() -> None:  # noqa: PLR0915
                     real = real_staffs(page)
                     if not real:
                         continue
-                    render_width = PHOTO_WIDTH if options.photo else PAGE_WIDTH
-                    zoom = render_width / page.rect.width
-                    pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
-                    image = np.frombuffer(pixmap.samples, np.uint8).reshape(
-                        pixmap.height, pixmap.width, pixmap.n
-                    )[..., :3][..., ::-1].copy()
-                    staffs = [corners(staff, zoom) for staff in real]
-                    if options.photo:
-                        seed = sum(ord(c) for c in work) * 100 + number
-                        image, staffs = photograph(image, staffs, seed)
-                    image, staffs = to_width(image, staffs, PAGE_WIDTH)
+                    image, staffs = page_image(
+                        page, real, page_seed(work, number), options.photo
+                    )
                     image_path = os.path.join(scratch, "page.jpg" if options.photo else "page.png")
                     cv2.imwrite(image_path, image)
 

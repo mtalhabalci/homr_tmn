@@ -81,6 +81,7 @@ def evaluate(
     batch_size: int,
     lenient: bool = False,
     index: str | None = None,
+    clean: bool = False,
 ) -> None:
     config = Config()
     if checkpoint:
@@ -103,7 +104,9 @@ def evaluate(
     model = load_model(config)
     model.eval_mode()
 
-    data = load_dataset(samples, config, validation_samples=samples)
+    data = load_dataset(
+        samples, config, validation_samples=samples, distort_validation=not clean
+    )
     loader = torch.utils.data.DataLoader(
         data["validation"], batch_size=batch_size, shuffle=False
     )
@@ -452,7 +455,7 @@ def _symbols_from_batch(
 
 
 def evaluate_generated(
-    checkpoint: str | None, limit: int | None, index: str | None = None
+    checkpoint: str | None, limit: int | None, index: str | None = None, clean: bool = False
 ) -> None:
     """Score the model reading each staff on its own, with nothing fed back."""
     config = Config()
@@ -481,7 +484,9 @@ def evaluate_generated(
         for branch, vocab in _vocabularies(config).items()
     }
 
-    data = load_dataset(samples, config, validation_samples=samples)
+    data = load_dataset(
+        samples, config, validation_samples=samples, distort_validation=not clean
+    )
     loader = torch.utils.data.DataLoader(data["validation"], batch_size=1, shuffle=False)
 
     total = substitutions = deletions = insertions = 0
@@ -609,9 +614,15 @@ if __name__ == "__main__":
         help="Count a Western sharp as sharp4 and a Western flat as flat5, so a "
              "checkpoint without makam tokens can be scored fairly.",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Read the images as they are, without the roughening that stands in "
+             "for a photograph. For staffs that were cut from a photograph already.",
+    )
     options = parser.parse_args()
     if options.generate:
-        evaluate_generated(options.checkpoint, options.limit, options.index)
+        evaluate_generated(options.checkpoint, options.limit, options.index, options.clean)
     else:
         evaluate(
             options.checkpoint,
@@ -619,4 +630,5 @@ if __name__ == "__main__":
             options.batch_size,
             options.lenient,
             options.index,
+            options.clean,
         )

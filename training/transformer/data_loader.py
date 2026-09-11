@@ -34,11 +34,13 @@ class DataLoader:
         corpus_list: list[str],
         config: Config,
         is_validation: bool = False,
+        distort: bool = True,
     ) -> None:
         self.corpus_list = self._add_mask_steps(corpus_list)
         self.vocab = Vocabulary()
         self.config = config
         self.is_validation = is_validation
+        self.distort = distort
 
     def _add_mask_steps(self, corpus_list: list[str]) -> Any:
         result = []
@@ -66,7 +68,8 @@ class DataLoader:
             random.seed(idx)
             np.random.seed(idx)
 
-        img = distort_image(img, allow_occlusions=not self.is_validation)
+        if self.distort:
+            img = distort_image(img, allow_occlusions=not self.is_validation)
         img = add_image_into_tr_omr_canvas(img)
 
         if self.is_validation:
@@ -116,6 +119,7 @@ def load_dataset(
     config: Config,
     val_split: float = 0.0,
     validation_samples: list[str] | None = None,
+    distort_validation: bool = True,
 ) -> dict[str, Any]:
     """Build the train and validation loaders.
 
@@ -123,6 +127,10 @@ def load_dataset(
     as the SymbTr converter does. Slicing it off the training list instead would
     leak: that list is shuffled and oversampled, so the same staff - and always
     the same works - would appear on both sides and flatter the validation loss.
+
+    Validation images are roughened like training images unless
+    distort_validation is off: staffs cut from a photograph already carry
+    their own damage, and a second dose would measure something else.
     """
     samples = _filter_valid_samples(samples)
     if validation_samples is not None:
@@ -150,6 +158,7 @@ def load_dataset(
             validation_list,
             config,
             is_validation=True,
+            distort=distort_validation,
         ),
         "validation_list": validation_list,
     }
