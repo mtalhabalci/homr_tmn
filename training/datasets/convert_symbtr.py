@@ -105,13 +105,18 @@ RARE_LIFTS = ("sharp5", "sharp2", "sharp8", "flat8")
 # near this figure with 1133 examples and reaches 81% recall, which is what the
 # target is calibrated on.
 RARE_LIFT_TARGET = 1500
-# A sign is the same shape wherever it sits on the staff, but the model does not
-# learn it that way: it meets the five-comma sharp 752 times on F5 and six times
-# on F4, and reads it at 89% on the first and 54% on the second. The three-comma
-# flat, with half as many examples spread over five degrees, reaches 98%. So the
-# spread matters more than the count, and a scarce (sign, degree) pair is topped
-# up as well as a scarce sign.
-RARE_PITCH_TARGET = 200
+# Where a sign sits matters more than how often it appears. Every class reads at
+# essentially 100% in the key signature, where it stands at the head of the staff
+# in a place the model can expect. Among the notes the same classes read at
+# 92-97% -- except the five-comma sharp, at 39%, which the corpus trains there
+# only 69 times against 689 in a signature. Recall among the notes tracks that
+# count: above 300 examples every class clears 92%, and the two that fall below
+# it are the two that fail.
+#
+# Height, the first suspect, does not hold up: the sign moved to a degree the
+# corpus never puts it on still read perfectly, as long as it stayed in the
+# signature.
+RARE_CONTEXT_TARGET = 400
 MAX_REPEATS = 8
 VAL_FRACTION = 0.1
 TEST_FRACTION = 0.1
@@ -761,11 +766,11 @@ def _work_of(line: str) -> str:
     return _STAFF_SUFFIX.sub("", os.path.basename(line.strip().split(",")[0]))
 
 
-def _lift_counts(line: str, by_pitch: bool = False) -> collections.Counter:
+def _lift_counts(line: str, by_context: bool = False) -> collections.Counter:
     """How many of each drawn accidental one staff carries.
 
-    With by_pitch the key is the sign together with the note it sits on, which
-    is the grain the model actually learns at.
+    With by_context the key is the sign together with where it stands -- in the
+    key signature or among the notes -- which is the grain the model learns at.
     """
     token_path = git_root / line.strip().split(",")[1]
     if not token_path.exists():
@@ -774,7 +779,11 @@ def _lift_counts(line: str, by_pitch: bool = False) -> collections.Counter:
     for token_line in token_path.read_text(encoding="utf-8").splitlines():
         parts = token_line.split()
         if len(parts) == 5 and parts[2] not in (".", "_"):
-            counts[(parts[2], parts[1]) if by_pitch else parts[2]] += 1
+            if by_context:
+                place = "signature" if parts[0] == key_accidental else "notes"
+                counts[(parts[2], place)] += 1
+            else:
+                counts[parts[2]] += 1
     return counts
 
 
@@ -782,7 +791,7 @@ def _top_up(
     train: list[str],
     extra: list[str],
     rng: random.Random,
-    by_pitch: bool,
+    by_context: bool,
     target: int,
 ) -> None:
     """Repeat scarce staffs one at a time until every key reaches target.
@@ -791,7 +800,7 @@ def _top_up(
     one accidental also counts towards every other it carries. MAX_REPEATS bounds
     a key too scarce to reach the target at all.
     """
-    per_line = {line: _lift_counts(line, by_pitch) for line in set(train + extra)}
+    per_line = {line: _lift_counts(line, by_context) for line in set(train + extra)}
     running: collections.Counter = collections.Counter()
     for line in train + extra:
         running.update(per_line[line])
@@ -811,7 +820,7 @@ def _top_up(
             running.update(per_line[line])
             added += 1
         if added:
-            label = f"{key[0]} on {key[1]}" if by_pitch else str(key)
+            label = f"{key[0]} in the {key[1]}" if by_context else str(key)
             eprint(
                 f"  {label}: {added} extra staffs -> {running[key]} occurrences"
                 + ("" if running[key] >= target else " (ran out of staffs)")
@@ -819,12 +828,12 @@ def _top_up(
 
 
 def _oversample(train: list[str], rng: random.Random) -> list[str]:
-    """Top scarce signs up, then scarce sign-and-degree pairs."""
+    """Top scarce signs up, then each sign where it is scarce."""
     extra: list[str] = []
     eprint(f"Topping scarce accidentals up to {RARE_LIFT_TARGET} occurrences:")
-    _top_up(train, extra, rng, by_pitch=False, target=RARE_LIFT_TARGET)
-    eprint(f"Topping scarce sign-and-degree pairs up to {RARE_PITCH_TARGET}:")
-    _top_up(train, extra, rng, by_pitch=True, target=RARE_PITCH_TARGET)
+    _top_up(train, extra, rng, by_context=False, target=RARE_LIFT_TARGET)
+    eprint(f"Topping each up to {RARE_CONTEXT_TARGET} where it stands:")
+    _top_up(train, extra, rng, by_context=True, target=RARE_CONTEXT_TARGET)
     return extra
 
 

@@ -45,7 +45,7 @@ import torch
 
 from homr.simple_logging import eprint
 from homr.transformer.configs import Config
-from homr.transformer.vocabulary import has_rhythm_symbol_a_position
+from homr.transformer.vocabulary import has_rhythm_symbol_a_position, key_accidental
 from training.architecture.transformer.tromr_arch import TrOMR, load_model
 from training.datasets.convert_symbtr import symbtr_test_index
 from training.transformer.data_loader import load_dataset
@@ -118,6 +118,12 @@ def evaluate(
     # whether a weak class is genuinely unread or only unread where it is scarce.
     by_pitch: collections.Counter = collections.Counter()
     by_pitch_hit: collections.Counter = collections.Counter()
+    # A sign in the key signature stands at the head of the staff, in a place the
+    # model can expect; the same sign among the notes has no such help. The
+    # corpus does not spread them evenly -- 689 of the 758 five-comma sharps in
+    # training sit in a signature -- so the two are worth counting apart.
+    by_place: collections.Counter = collections.Counter()
+    by_place_hit: collections.Counter = collections.Counter()
     joint: collections.Counter = collections.Counter()
     staff_errors: list[int] = []
     staff_misreads: list[int] = []
@@ -191,6 +197,7 @@ def evaluate(
 
             lift_preds, lift_labels_all = step["lift"]
             pitch_preds_all, pitch_labels_all = step["pitch"]
+            rhythm_labels_all = step["rhythm"][1]
             span = min(lift_preds.shape[1], pitch_labels_all.shape[1], eval_mask.shape[1])
             valid = eval_mask[:, :span] & (lift_labels_all[:, :span] != -100)
             for row, column in valid.nonzero(as_tuple=False).tolist():
@@ -199,9 +206,13 @@ def evaluate(
                 if not lift_is_symbol(name):
                     continue
                 pitch = names["pitch"].get(int(pitch_labels_all[row][column]), "?")
+                rhythm = names["rhythm"].get(int(rhythm_labels_all[row][column]), "")
+                place = "signature" if rhythm == key_accidental else "among the notes"
                 by_pitch[(name, pitch)] += 1
+                by_place[(name, place)] += 1
                 if int(lift_preds[row][column]) == actual:
                     by_pitch_hit[(name, pitch)] += 1
+                    by_place_hit[(name, place)] += 1
 
             # A symbol is only usable if every branch got it right at once.
             width = min(step[branch][0].shape[1] for branch in BRANCHES)
@@ -285,6 +296,17 @@ def evaluate(
     eprint(f"   invented (blank read as): {invented}")
     if real:
         eprint(f"   caught                  : {100 * (real - dropped) / real:.1f}%")
+
+    if by_place:
+        eprint("\n=== accidentals, in the signature and among the notes ===")
+        eprint(f"{'symbol':<10}{'signature':>22}{'among the notes':>22}")
+        for name in sorted({n for n, _ in by_place}):
+            cells = []
+            for place in ("signature", "among the notes"):
+                seen = by_place[(name, place)]
+                got = by_place_hit[(name, place)]
+                cells.append(f"{got}/{seen} = {100 * got / seen:.0f}%" if seen else "-")
+            eprint(f"{name:<10}{cells[0]:>22}{cells[1]:>22}")
 
     weak = sorted(
         {
