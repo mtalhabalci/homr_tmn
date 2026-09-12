@@ -385,6 +385,16 @@ class EngravingState:
         return lift_for_commas(shown)
 
 
+# Mus2 never prints a dotted rest. A dotted quarter's worth of silence is a
+# quarter rest followed by an eighth rest -- 36 of 37 times on the page, the
+# odd one out reversed -- so a rest is split into plain values, largest first.
+_UNDOTTED_UNITS = [unit for unit in _PLAIN_UNITS if unit[2] == 0]
+
+
+def rest_parts(duration: Fraction) -> list[tuple[int, int]]:
+    return _greedy_split(duration, _UNDOTTED_UNITS) or split_duration(duration)
+
+
 def tokens_for_event(
     event: dict, unresolved: collections.Counter, state: EngravingState | None = None
 ) -> list[EncodedSymbol]:
@@ -392,7 +402,8 @@ def tokens_for_event(
     if event["grace"]:
         parts, suffix = [(8, 0)], "G"
     else:
-        parts, suffix = split_duration(event["duration"]), ""
+        split = split_duration if pitch is not None else rest_parts
+        parts, suffix = split(event["duration"]), ""
         if not parts:
             unresolved[str(event["duration"])] += 1
             return []
@@ -731,6 +742,78 @@ def _staff_cuts(
     return cuts
 
 
+def _value(rhythm: str) -> Fraction:
+    kern = rhythm.split("_", 1)[1].rstrip("G")
+    dots = kern.count(".")
+    return Fraction(1, int(kern.rstrip("."))) * (2 - Fraction(1, 2**dots))
+
+
+def _kind(base: int) -> str:
+    return {1: "1", 2: "2", 4: "4"}.get(base, "short")
+
+
+def _ways(total: Fraction, parts: int) -> list[list[tuple[int, int]]]:
+    """Every way to write a duration as so many tied plain values, in order."""
+    if parts == 1:
+        return [[(base, dots)] for value, base, dots in _PLAIN_UNITS if value == total]
+    return [
+        [(base, dots), *rest]
+        for value, base, dots in _PLAIN_UNITS
+        if value < total
+        for rest in _ways(total - value, parts - 1)
+    ]
+
+
+def _splits_from_page(
+    tokens: list[EncodedSymbol], where: list[int | None], heads: list[dict]
+) -> list[EncodedSymbol]:
+    """Split each long note the way the page splits it.
+
+    A note too long for one notehead is written as tied notes, and there are
+    usually several ways to do it: five eighths as a half and an eighth, or a
+    dotted quarter and a quarter. split_duration takes the largest value first;
+    Mus2 follows the beats of the usul, and of 428 tied pairs the two agreed
+    once. The page tells which way it went: each head is a whole, a half, a
+    quarter or shorter, and is dotted or not, and in 424 of the 428 exactly one
+    way fits that. Where none or several fit, the label is left as it was.
+    """
+    result = list(tokens)
+    notes = [i for i, t in enumerate(tokens) if t.rhythm.startswith("note")]
+    k = 0
+    while k < len(notes):
+        first = tokens[notes[k]]
+        group = [k]
+        k += 1
+        if first.articulation != "tieStart":
+            continue
+        while k < len(notes) and tokens[notes[k]].articulation == "tieStop" and tokens[notes[k]].pitch == first.pitch:
+            group.append(k)
+            k += 1
+        if len(group) < 2 or any(where[g] is None for g in group):
+            continue
+        page = [(heads[where[g]]["kind"], int(heads[where[g]]["dotted"])) for g in group]
+        if any(kind is None for kind, _ in page):
+            continue
+        labelled = []
+        for g in group:
+            kern = tokens[notes[g]].rhythm.split("_", 1)[1]
+            labelled.append((_kind(int(kern.rstrip("."))), kern.count(".")))
+        if labelled == page:
+            continue
+        total = sum(_value(tokens[notes[g]].rhythm) for g in group)
+        fitting = [way for way in _ways(total, len(group)) if [(_kind(b), d) for b, d in way] == page]
+        if len(fitting) != 1:
+            page_report["tied notes the page does not settle"] += 1
+            continue
+        for g, (base, dots) in zip(group, fitting[0]):
+            old = tokens[notes[g]]
+            result[notes[g]] = EncodedSymbol(
+                f"note_{base}{'.' * dots}", old.pitch, old.lift, old.articulation, old.position
+            )
+        page_report["tied notes split the way the page splits them"] += 1
+    return result
+
+
 def _signs_from_page(
     tokens: list[EncodedSymbol], where: list[int | None], heads: list[dict]
 ) -> list[EncodedSymbol]:
@@ -851,6 +934,7 @@ def convert_work(
                 continue
             if signs_readable:
                 tokens = _signs_from_page(tokens, where, heads[index])
+                tokens = _splits_from_page(tokens, where, heads[index])
             page_report["staffs kept"] += 1
             base = os.path.join(working_dir, f"{stem}-{index:02d}")
             page = document[staff["page"]]
@@ -1155,6 +1239,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Put every work in the split the current index files put it in.",
     )
+    parser.add_argument(
+        "--add-train",
+        default=None,
+        help="An index of extra staffs, such as the courtesy-accidental ones, to "
+             "train on besides the corpus. Used with --split-only.",
+    )
     args = parser.parse_args()
     random.seed(0)
     placed = previous_split() if args.keep_split else None
@@ -1162,6 +1252,10 @@ if __name__ == "__main__":
         # The index files are about to be rewritten to point at the new folder;
         # keep the old ones beside them, named after the folder they point at.
         before = os.path.basename(working_dir)
+        if os.path.exists(index_file):
+            with open(index_file, encoding="utf-8") as handle:
+                first = handle.readline().split(",")[0]
+            before = first.split("/")[1] if first.count("/") >= 2 else before
         for path in (index_file, index_train, index_val, index_test):
             kept = path[: -len(".txt")] + f"_{before}.txt"
             if os.path.exists(path) and not os.path.exists(kept):
@@ -1176,6 +1270,14 @@ if __name__ == "__main__":
         write_splits(rebuilt, placed)
     elif args.split_only:
         with open(index_file, encoding="utf-8") as handle:
-            write_splits(handle.readlines(), placed)
+            corpus = handle.readlines()
+        if args.add_train:
+            # Their names are not works of the corpus, so split_as_before puts
+            # them in training -- which is also the only place they may go.
+            with open(args.add_train, encoding="utf-8") as handle:
+                extra = [line for line in handle if line.strip()]
+            eprint(f"Adding {len(extra)} staffs from {args.add_train} to training")
+            corpus += extra
+        write_splits(corpus, placed)
     else:
         convert_symbtr(just_token_files=args.only_tokens, limit=args.limit, placed=placed)

@@ -29,7 +29,7 @@ from training.datasets.convert_symbtr import (
 git_root = Path(__file__).parent.parent.absolute()
 
 
-def package(destination: str, working_dir: str = working_dir) -> None:
+def package(destination: str, working_dir: str = working_dir, also: list[str] | None = None) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(destination)), exist_ok=True)
     if not os.path.isdir(working_dir):
         eprint(f"Nothing to package: {working_dir} does not exist.")
@@ -55,6 +55,17 @@ def package(destination: str, working_dir: str = working_dir) -> None:
                 archive.add(
                     index, os.path.relpath(index, git_root).replace(os.sep, "/")
                 )
+        # Further folders whose staffs the index files point into, such as the
+        # courtesy-accidental staffs, taken whole with their own index files.
+        for folder in also or []:
+            count = 0
+            for root, _, names in os.walk(folder):
+                for name in sorted(names):
+                    if name.endswith((".png", ".tokens", ".txt")):
+                        path = os.path.join(root, name)
+                        archive.add(path, os.path.relpath(path, git_root).replace(os.sep, "/"))
+                        count += 1
+            eprint(f"  and {count} files from {folder}")
     size = os.path.getsize(destination) / 1e6
     eprint(f"Wrote {destination} ({size:.0f} MB)")
     eprint("Upload it to a Google Drive folder named homr_makam.")
@@ -72,6 +83,12 @@ if __name__ == "__main__":
         default=None,
         help="Folder under datasets/ holding the staff files, if not SymbTr-work.",
     )
+    parser.add_argument(
+        "--also",
+        action="append",
+        default=[],
+        help="Another folder under datasets/ to include whole. May be repeated.",
+    )
     options = parser.parse_args()
     folder = os.path.join(git_root, "datasets", options.work_dir) if options.work_dir else working_dir
-    package(options.out, folder)
+    package(options.out, folder, [os.path.join(git_root, "datasets", extra) for extra in options.also])

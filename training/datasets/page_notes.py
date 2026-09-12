@@ -18,6 +18,12 @@ from training.datasets.shift_staff import MARGIN, _characters, _degree
 
 NATURAL = 0x6E
 LETTERS = "CDEFGAB"
+# Mus2 has two dot characters; which one depends on where the dot must sit.
+DOTS = frozenset({0xE2, 0xAB})
+# What the notehead character says about the note's value: a whole, a half,
+# a quarter, or shorter -- beamed or flagged, which the head alone cannot split.
+HEAD_KIND = {0x28: "1", 0x29: "2", 0x27: "2", 0x2A: "4", 0x6F: "4",
+             0x78: "short", 0x2B: "short", 0x25: "short", 0x2C: "short"}
 
 # How far left of its notehead an accidental may start, in staff steps.
 REACH = 5
@@ -81,9 +87,14 @@ def read_staff(page: "fitz.Page", staff: list[float]) -> list[dict]:
     signs = [
         g for g in glyphs if lift_of_glyph(g["code"]) and g["x"] >= first - REACH * step
     ]
+    dots = [g for g in glyphs if g["code"] in DOTS]
     notes = []
     for head in heads:
         y = head["origin"][1]
+        dotted = any(
+            0 < dot["x"] - head["origin"][0] < 4 * step and abs(dot["origin"][1] - y) < 1.5 * step
+            for dot in dots
+        )
         before = [
             s
             for s in signs
@@ -94,10 +105,13 @@ def read_staff(page: "fitz.Page", staff: list[float]) -> list[dict]:
         notes.append(
             {
                 "x": head["x"],
+                "origin": head["origin"],
                 "y": y,
                 "pitch": pitch_at(y, bottom, step),
                 "size": head["size"],
                 "code": head["code"],
+                "kind": HEAD_KIND.get(head["code"]),
+                "dotted": dotted,
                 "lift": lift_of_glyph(sign["code"]) if sign else None,
                 "sign": sign,
             }
