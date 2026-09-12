@@ -814,6 +814,118 @@ def _splits_from_page(
     return result
 
 
+def _signature_from_page(
+    tokens: list[EncodedSymbol], printed: list[tuple[str, str]]
+) -> list[EncodedSymbol]:
+    """Label the key signature with the signs printed at the head of the staff.
+
+    printed_key_signature decides which .mu2 entries were engraved by comma
+    value alone, and a hicaz signature of B-flat, F-sharp and C-sharp printed
+    as B-flat and C-sharp comes out as B-flat and F-sharp: both sharps are
+    four commas. The page says which note each sign sits on.
+    """
+    labelled = [(t.pitch, t.lift) for t in tokens if t.rhythm == key_accidental]
+    if labelled == printed:
+        return tokens
+    page_report["staffs whose key signature now follows the page"] += 1
+    rest = [t for t in tokens if t.rhythm != key_accidental]
+    signature = [EncodedSymbol(key_accidental, pitch, lift, "_", "upper") for pitch, lift in printed]
+    # The clef comes first, then the signature, then the rest of the staff.
+    return rest[:1] + signature + rest[1:]
+
+
+_CLOSINGS = ("barline", "repeatEnd", "bolddoublebarline", "voltaStop")
+_OPENINGS = ("repeatStart", "voltaStart")
+_STRUCTURE = _CLOSINGS + _OPENINGS
+
+
+def _bars_from_page(  # noqa: PLR0913
+    tokens: list[EncodedSymbol],
+    where: list[int | None],
+    heads: list[dict],
+    marks: list[tuple[float, str]],
+    hooks: list[tuple[float, str]],
+    page_width: float,
+) -> list[EncodedSymbol]:
+    """Label each barline the way the page draws it.
+
+    The .mu2 marks sections for Mus2 with a handful of characters, and the
+    converter read every one of them as a repeat or a closing double bar. The
+    page does not: a mark that ends a section may be printed as a plain
+    barline with "[KARAR'a]" beneath it, a mark that opens one as a segno above
+    the first measure, and the "$" that became bolddoublebarline is a segno
+    too. Two labels in five for the repeat end stood over a plain barline.
+
+    Between each pair of notes the page shows plain rules, or a repeat whose
+    dots say which way it faces, or nothing; and above them a volta bracket
+    may open or close. The labelled barline and volta marks between the same
+    two notes are set to match: volta closings had drifted a measure early.
+    """
+    notes = [i for i, t in enumerate(tokens) if t.rhythm.startswith("note")]
+    anchors = [(-1, 0.0)]
+    for n, i in enumerate(notes):
+        if where[n] is not None:
+            anchors.append((i, heads[where[n]]["origin"][0]))
+    anchors.append((len(tokens), page_width))
+
+    result: list[EncodedSymbol] = []
+    for (start, left), (end, right) in zip(anchors, anchors[1:]):
+        if start >= 0:
+            result.append(tokens[start])
+        window = tokens[start + 1 : end]
+        low, high = (left + 2 if start >= 0 else 0), right - 2
+        shape = bar_shape_between(marks, low, high)
+        opens = any(low < x < high and kind == "start" for x, kind in hooks)
+        closes = any(low < x < high and kind == "end" for x, kind in hooks)
+        result.extend(_rebar(window, shape, opens, closes, at_staff_start=start < 0))
+    return result
+
+
+def bar_shape_between(marks: list[tuple[float, str]], low: float, high: float) -> str:
+    from training.datasets.page_notes import bar_shape  # noqa: PLC0415
+
+    return bar_shape([kind for x, kind in marks if low < x < high])
+
+
+def _rebar(
+    window: list[EncodedSymbol], shape: str, opens: bool, closes: bool, at_staff_start: bool
+) -> list[EncodedSymbol]:
+    """The tokens between two notes, their barline and volta marks set from the page.
+
+    Only a gap the labels already put a barline or volta mark in is touched: a
+    mark the page shows where the labels see no measure boundary at all is a
+    disagreement about the measures, which this cannot settle.
+    """
+    labelled = [t.rhythm for t in window if t.rhythm in _STRUCTURE]
+    if not labelled or shape == "thick":
+        return window
+    if shape == "none" and not at_staff_start and not (opens or closes):
+        return window
+    # A bracket that closes on a plain barline takes the barline's place, as
+    # the corpus has always written it; on a repeat it follows the repeat.
+    stop = ["voltaStop"] if closes else []
+    closing = {
+        "none": stop,
+        "plain": stop or ["barline"],
+        "end": ["repeatEnd", *stop],
+        "start": stop or ["barline"],
+        "end+start": ["repeatEnd", *stop],
+        "final": ["bolddoublebarline", *stop],
+    }[shape]
+    if at_staff_start:
+        # Nothing ends before the first note of a line; only a repeat can open.
+        closing = []
+    opening = (["repeatStart"] if shape in ("start", "end+start") else []) + (["voltaStart"] if opens else [])
+    wanted = closing + opening
+    if wanted == labelled:
+        return window
+    page_report[f"barline {'+'.join(labelled)} -> {'+'.join(wanted) or 'nothing'}"] += 1
+    first = next(i for i, t in enumerate(window) if t.rhythm in _STRUCTURE)
+    kept = [t for t in window if t.rhythm not in _STRUCTURE]
+    placed = first - sum(1 for t in window[:first] if t.rhythm in _STRUCTURE)
+    return kept[:placed] + [EncodedSymbol(rhythm) for rhythm in wanted] + kept[placed:]
+
+
 def _signs_from_page(
     tokens: list[EncodedSymbol], where: list[int | None], heads: list[dict]
 ) -> list[EncodedSymbol]:
@@ -860,10 +972,13 @@ def convert_work(
 
     # Imported here: page_notes itself builds on this module.
     from training.datasets.page_notes import (  # noqa: PLC0415
+        bar_rules,
         full_size,
+        key_signature,
         pair_notes,
         read_staff,
         uses_usual_encoding,
+        volta_hooks,
     )
 
     mu2_path = os.path.join(symbtr_mu2, (mu2_stem or stem) + ".mu2")
@@ -933,8 +1048,15 @@ def convert_work(
                 page_report["staffs left out, notes differ from the page"] += 1
                 continue
             if signs_readable:
+                tokens = _signature_from_page(
+                    tokens, key_signature(document[staff["page"]], staff["lines"], heads[index])
+                )
                 tokens = _signs_from_page(tokens, where, heads[index])
                 tokens = _splits_from_page(tokens, where, heads[index])
+                page = document[staff["page"]]
+                marks = bar_rules(page, staff["lines"], heads[index])
+                hooks = volta_hooks(page, staff["lines"])
+                tokens = _bars_from_page(tokens, where, heads[index], marks, hooks, page.rect.width)
             page_report["staffs kept"] += 1
             base = os.path.join(working_dir, f"{stem}-{index:02d}")
             page = document[staff["page"]]

@@ -33,9 +33,68 @@ from training.datasets.convert_symbtr import (
     index_val,
     symbtr_pdf,
 )
-from training.datasets.page_notes import full_size, pair_notes, read_staff, uses_usual_encoding
+from training.datasets.page_notes import (
+    bar_rules,
+    bar_shape,
+    full_size,
+    key_signature,
+    pair_notes,
+    read_staff,
+    uses_usual_encoding,
+    volta_hooks,
+)
 
 STAFF = re.compile(r"-(\d+)$")
+BARS = ("barline", "repeatEnd", "repeatStart", "bolddoublebarline", "voltaStop")
+
+
+def label_bar_shape(rhythms: list[str]) -> str:
+    bars = [r for r in rhythms if r in BARS]
+    if not bars:
+        return "none"
+    end, start = "repeatEnd" in bars, "repeatStart" in bars
+    if end and start:
+        return "end+start"
+    if end:
+        return "end"
+    if start:
+        return "start"
+    return "final" if "bolddoublebarline" in bars else "plain"
+
+
+def bar_verdicts(page: "fitz.Page", lines: list[float], rows: list[list[str]], pairs_heads: tuple) -> list[tuple[str, str]]:  # noqa: F821
+    """(label, page) barline and volta marks for every gap between two paired notes."""
+    heads, where = pairs_heads
+    marks = bar_rules(page, lines, heads)
+    hooks = volta_hooks(page, lines)
+
+    def page_kind(low: float, high: float) -> str:
+        kind = bar_shape([k for mx, k in marks if low < mx < high])
+        kind += " volta-start" if any(low < x < high and k == "start" for x, k in hooks) else ""
+        kind += " volta-end" if any(low < x < high and k == "end" for x, k in hooks) else ""
+        return kind
+
+    def label_kind(rhythms: list[str]) -> str:
+        kind = label_bar_shape(rhythms)
+        if kind == "none" and "voltaStop" in rhythms:
+            kind = "plain"
+        kind += " volta-start" if "voltaStart" in rhythms else ""
+        kind += " volta-end" if "voltaStop" in rhythms else ""
+        return kind
+
+    found, pending, previous, number = [], [], 0.0, -1
+    for row in rows:
+        if row[0].startswith("note"):
+            number += 1
+            if where[number] is None:
+                continue
+            x = heads[where[number]]["origin"][0]
+            found.append((label_kind(pending), page_kind(previous, x - 2)))
+            pending, previous = [], x + 2
+        else:
+            pending.append(row[0])
+    found.append((label_kind(pending), page_kind(previous, page.rect.width)))
+    return found
 
 
 def note_tokens(path: str) -> list[list[str]]:
@@ -108,6 +167,8 @@ def main() -> None:  # noqa: PLR0915
     by_work: collections.Counter = collections.Counter()
     unpaired: collections.Counter = collections.Counter()
     shifted_works: collections.Counter = collections.Counter()
+    signatures: collections.Counter = collections.Counter()
+    bars: collections.Counter = collections.Counter()
     examples = []
     for work in names:
         path = os.path.join(symbtr_pdf, work + ".pdf")
@@ -136,6 +197,28 @@ def main() -> None:  # noqa: PLR0915
                 paired += 1
                 if not usual:
                     continue
+                labelled_key = [
+                    (parts[1], parts[2])
+                    for parts in (line.split() for line in open(os.path.join(git_root, tokens), encoding="utf-8"))
+                    if len(parts) == 5 and parts[0] == "keyAccidental"
+                ]
+                heads = read_staff(page, lines)
+                printed_key = key_signature(page, lines, heads)
+                signatures["agree" if labelled_key == printed_key else "differ"] += 1
+                if labelled_key != printed_key and len(examples) < 15:
+                    examples.append(f"{work}-{number:02d} key: label {labelled_key} page {printed_key}")
+                rows = [
+                    parts for parts in (line.split() for line in open(os.path.join(git_root, tokens), encoding="utf-8"))
+                    if len(parts) == 5
+                ]
+                where = pair_notes([(r[0], r[1]) for r in rows if r[0].startswith("note")], heads)
+                for label_kind, page_kind in bar_verdicts(page, lines, rows, (heads, where)):
+                    # A barline the labels place where the page draws none is
+                    # a measure the two divide differently; not judged here.
+                    if label_kind == page_kind or (label_kind != "none" and page_kind == "none"):
+                        bars["agree"] += 1
+                    else:
+                        bars[f"label {label_kind}, page {page_kind}"] += 1
                 for row, head in pairs:
                     notes += 1
                     label = row[2] if row[2] not in ("_", ".") else None
@@ -169,6 +252,11 @@ def main() -> None:  # noqa: PLR0915
             eprint(f"     {count:>4}  {work}")
     eprint(f"\nsigns compared in {len(names) - unusual_works} works with the usual Mus2 codes"
            f" ({unusual_works} others left out)")
+    eprint(f"key signatures: agree {signatures['agree']}, differ {signatures['differ']}")
+    eprint(f"barlines between notes: agree {bars['agree']}, differ {sum(bars.values()) - bars['agree']}")
+    for kind, count in bars.most_common():
+        if kind != "agree":
+            eprint(f"     {count:>6}  {kind}")
     eprint(f"notes checked: {notes}")
     wrong = notes - verdicts["agree"]
     eprint(f"  label and page agree : {verdicts['agree']}")

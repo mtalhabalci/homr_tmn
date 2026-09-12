@@ -119,6 +119,167 @@ def read_staff(page: "fitz.Page", staff: list[float]) -> list[dict]:
     return notes
 
 
+def key_signature(page: "fitz.Page", staff: list[float], heads: list[dict]) -> list[tuple[str, str]]:
+    """The key signature at the head of the staff, as (pitch, sign), left to right.
+
+    The signs standing left of the first notehead and out of reach of that
+    note's own sign. Mus2 sometimes draws a signature sign twice on the same
+    spot; it shows once, so it counts once.
+    """
+    if not heads:
+        return []
+    top, bottom = staff[0], staff[-1]
+    step = (bottom - top) / 8
+    band = fitz.Rect(0, top - MARGIN, page.rect.width, bottom + MARGIN)
+    limit = heads[0]["x"] - REACH * step
+    found: list[dict] = []
+    for glyph in _characters(page, band):
+        lift = lift_of_glyph(glyph["code"]) if glyph["notation"] else None
+        if not lift or lift == "N" or glyph["x"] >= limit:
+            continue
+        y = glyph["origin"][1]
+        if not top - 4 * step <= y <= bottom + 4 * step:
+            continue
+        if any(g["code"] == glyph["code"] and abs(g["x"] - glyph["x"]) < 1 and abs(g["origin"][1] - y) < 1
+               for g in found):
+            continue
+        found.append(glyph)
+    found.sort(key=lambda g: g["x"])
+    return [(pitch_at(g["origin"][1], bottom, step), lift_of_glyph(g["code"])) for g in found]
+
+
+# The mark Mus2 closes some lines with: a heavy rule with the program's name
+# set sideways against it. It stands where a barline would, and reads as one.
+LINE_END = 0x178
+
+
+def bar_rules(page: "fitz.Page", staff: list[float], heads: list[dict]) -> list[tuple[float, str]]:
+    """The barline strokes on a staff, as (x, "thin" | "thick" | "dot").
+
+    A barline spans the staff exactly, and a stem touches a notehead; that is
+    how the two are told apart. Mus2 draws the thick stroke of a repeat as a
+    filled rectangle or a wide line, and each repeat dot as a small filled
+    circle of four arcs in one of the two middle spaces. (The segno, 0x60, is
+    a character above the staff and no barline at all.)
+    """
+    top, bottom = staff[0], staff[-1]
+    height = bottom - top
+    step = height / 8
+    strokes = []
+    arcs = []
+    for drawing in page.get_drawings():
+        width = drawing.get("width") or 0
+        for item in drawing["items"]:
+            if item[0] == "l":
+                a, b = item[1], item[2]
+                if abs(a.x - b.x) < 0.9 and abs(min(a.y, b.y) - top) < 2.5 and abs(max(a.y, b.y) - bottom) < 2.5:
+                    strokes.append(((a.x + b.x) / 2, "thick" if width >= 1.5 else "thin"))
+            elif item[0] == "re":
+                r = item[1]
+                if r.height > height * 0.8 and abs(r.y0 - top) < 2.5 and abs(r.y1 - bottom) < 2.5 and r.width < 4:
+                    strokes.append(((r.x0 + r.x1) / 2, "thick" if r.width >= 1.5 else "thin"))
+            elif item[0] == "c" and drawing.get("fill") is not None:
+                xs = [p.x for p in item[1:5]]
+                ys = [p.y for p in item[1:5]]
+                if max(xs) - min(xs) < 1.2 and max(ys) - min(ys) < 1.2:
+                    arcs.append(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2))
+    strokes = [
+        (x, kind) for x, kind in strokes
+        if not any(h["x"] - 2.5 <= x <= h["x"] + 2.5 * 3 for h in heads if kind == "thin")
+    ]
+    # Four arcs make a dot; a repeat dot sits in the second or third space.
+    dots: list[tuple[float, float]] = []
+    for x, y in arcs:
+        if not staff[1] < y < staff[3]:
+            continue
+        if any(abs(x - dx) < 1.2 and abs(y - dy) < 1.2 for dx, dy in dots):
+            continue
+        dots.append((x, y))
+    strokes += [(x, "dot") for x, _ in dots]
+    band = fitz.Rect(0, top - MARGIN, page.rect.width, bottom + MARGIN)
+    notation = [glyph for glyph in _characters(page, band) if glyph["notation"]]
+    for glyph in notation:
+        if glyph["code"] == LINE_END and top - step <= glyph["origin"][1] <= bottom + 4 * step:
+            strokes.append((glyph["x"], "thin"))
+    # Whatever stands left of the clef is the edge of the system, not a barline.
+    clef = min((glyph["x"] for glyph in notation), default=0)
+    strokes = [(x, kind) for x, kind in strokes if x > clef]
+    strokes.sort()
+    merged: list[tuple[float, str]] = []
+    for x, kind in strokes:
+        # A rule drawn twice on one spot is one rule. Two dots on one spot are
+        # the upper and lower dot of a repeat, and both count.
+        if kind != "dot" and merged and abs(merged[-1][0] - x) < 0.8 and merged[-1][1] == kind:
+            continue
+        merged.append((x, kind))
+    return merged
+
+
+def volta_hooks(page: "fitz.Page", staff: list[float]) -> list[tuple[float, str]]:
+    """Where volta brackets open and close on a staff, as (x, "start" | "end").
+
+    A bracket is a rule above the staff with a short hook turned down at the
+    end where it begins, and another where it closes. A bracket carried over
+    from the line before has no opening hook; one carried on to the next line
+    has no closing hook.
+    """
+    top = staff[0]
+    hooks, rules = [], []
+    for drawing in page.get_drawings():
+        # Bracket and hook are hairlines; a beam is drawn wide.
+        if (drawing.get("width") or 0) >= 1:
+            continue
+        for item in drawing["items"]:
+            if item[0] != "l":
+                continue
+            a, b = item[1], item[2]
+            # The bracket rides higher over high notes and lower over low
+            # ones, so its hooks run from 3 to 30 points. Mus2 draws tuplet
+            # brackets as curves, so a straight hook up here is a volta's.
+            if (
+                abs(a.x - b.x) < 0.5
+                and top - 45 < min(a.y, b.y) < top - 3
+                and max(a.y, b.y) <= top + 1
+                and 3 <= abs(a.y - b.y) <= 30
+            ):
+                hooks.append(((a.x + b.x) / 2, min(a.y, b.y)))
+            # A short bracket over one measure leaves only a stub of rule
+            # between its hook and its number.
+            elif abs(a.y - b.y) < 0.5 and top - 45 < a.y < top - 3 and abs(a.x - b.x) > 0.8:
+                rules.append((min(a.x, b.x), max(a.x, b.x), a.y))
+    found = []
+    for x, y in hooks:
+        opens = any(abs(left - x) < 0.8 and abs(ry - y) < 0.8 for left, _, ry in rules)
+        closes = any(abs(right - x) < 0.8 and abs(ry - y) < 0.8 for _, right, ry in rules)
+        if opens:
+            found.append((x, "start"))
+        if closes:
+            found.append((x, "end"))
+    return sorted(found)
+
+
+def bar_shape(strokes: list[str]) -> str:
+    """What a run of strokes between two notes means, in label terms.
+
+    plain, a repeat's "end", "start" or "end+start" -- told by which side its
+    dots are on -- or "final", a heavy double bar with no dots at all.
+    """
+    rules = [kind for kind in strokes if kind != "dot"]
+    if not rules:
+        return "none"
+    first = strokes.index(rules[0])
+    last = len(strokes) - 1 - strokes[::-1].index(rules[-1])
+    left = strokes[:first].count("dot") >= 2
+    right = strokes[last + 1 :].count("dot") >= 2
+    if left and right:
+        return "end+start"
+    if left:
+        return "end"
+    if right:
+        return "start"
+    return "final" if "thick" in rules else "plain"
+
+
 def is_grace(rhythm: str) -> bool:
     return rhythm.startswith("note") and rhythm.endswith("G")
 
