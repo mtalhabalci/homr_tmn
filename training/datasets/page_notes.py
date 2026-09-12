@@ -280,6 +280,33 @@ def bar_shape(strokes: list[str]) -> str:
     return "final" if "thick" in rules else "plain"
 
 
+def time_signature(page: "fitz.Page", staff: list[float], heads: list[dict]) -> str | None:
+    """The time signature printed before the first note, as a label, if any.
+
+    Mus2 sets it in its own digits, the upper number above the middle line and
+    the lower one below it.
+    """
+    if not heads:
+        return None
+    top, bottom = staff[0], staff[-1]
+    step = (bottom - top) / 8
+    middle = (top + bottom) / 2
+    band = fitz.Rect(0, top - MARGIN, page.rect.width, bottom + MARGIN)
+    digits = sorted(
+        (
+            g for g in _characters(page, band)
+            if g["notation"] and g["char"].isdigit() and g["x"] < heads[0]["x"]
+            and top - step < g["origin"][1] < bottom + step
+        ),
+        key=lambda g: g["x"],
+    )
+    upper = "".join(g["char"] for g in digits if g["origin"][1] <= middle + 0.5)
+    lower = "".join(g["char"] for g in digits if g["origin"][1] > middle + 0.5)
+    if not upper or not lower:
+        return None
+    return f"timeSignature_{upper}/{lower}"
+
+
 def is_grace(rhythm: str) -> bool:
     return rhythm.startswith("note") and rhythm.endswith("G")
 

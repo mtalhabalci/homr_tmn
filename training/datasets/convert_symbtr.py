@@ -926,6 +926,33 @@ def _rebar(
     return kept[:placed] + [EncodedSymbol(rhythm) for rhythm in wanted] + kept[placed:]
 
 
+def _time_from_page(tokens: list[EncodedSymbol], printed: str | None) -> list[EncodedSymbol]:
+    """Label the time signature as printed: a düyek can be engraved 8/8 where
+    the .mu2 header says 4/4. A printed signature the vocabulary cannot spell
+    is left as the .mu2 has it."""
+    if printed is None or printed not in _rhythm_vocabulary():
+        return tokens
+    result = []
+    for token in tokens:
+        if token.rhythm.startswith("timeSignature") and token.rhythm != printed:
+            page_report[f"time signature {token.rhythm[14:]} -> {printed[14:]}"] += 1
+            token = EncodedSymbol(printed)
+        result.append(token)
+    return result
+
+
+def _rhythm_vocabulary() -> dict:
+    from homr.transformer.vocabulary import Vocabulary  # noqa: PLC0415
+
+    global _RHYTHMS  # noqa: PLW0603
+    if _RHYTHMS is None:
+        _RHYTHMS = Vocabulary().rhythm
+    return _RHYTHMS
+
+
+_RHYTHMS: dict | None = None
+
+
 def _signs_from_page(
     tokens: list[EncodedSymbol], where: list[int | None], heads: list[dict]
 ) -> list[EncodedSymbol]:
@@ -977,6 +1004,7 @@ def convert_work(
         key_signature,
         pair_notes,
         read_staff,
+        time_signature,
         uses_usual_encoding,
         volta_hooks,
     )
@@ -1051,6 +1079,10 @@ def convert_work(
                 tokens = _signature_from_page(
                     tokens, key_signature(document[staff["page"]], staff["lines"], heads[index])
                 )
+                if index == 0:
+                    tokens = _time_from_page(
+                        tokens, time_signature(document[staff["page"]], staff["lines"], heads[index])
+                    )
                 tokens = _signs_from_page(tokens, where, heads[index])
                 tokens = _splits_from_page(tokens, where, heads[index])
                 page = document[staff["page"]]
