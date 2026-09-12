@@ -28,6 +28,7 @@ import collections
 import os
 import random
 import re
+import shutil
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -633,13 +634,7 @@ def _cut_into_measures(score: Mu2Score) -> list[list[dict]]:
     return measures
 
 
-def _staff_tokens(
-    measures: list[list[dict]],
-    score: Mu2Score,
-    is_first_staff: bool,
-    unresolved: collections.Counter,
-    state: EngravingState,
-) -> list[EncodedSymbol]:
+def _header(score: Mu2Score, state: EngravingState, is_first_staff: bool) -> list[EncodedSymbol]:
     # Mus2 redraws the clef and the whole key signature at the head of every
     # system, so every staff sample carries them; only the time signature is
     # printed once, at the start of the piece. The staff image is all the model
@@ -658,16 +653,100 @@ def _staff_tokens(
             )
     if is_first_staff:
         tokens.append(EncodedSymbol(f"timeSignature_{score.numerator}/{score.denominator}"))
-    for measure in measures:
-        opening = next((e["open"] for e in measure if e.get("open")), None)
-        closing = next((e["close"] for e in measure if e.get("close")), None)
-        if opening:
-            tokens.append(EncodedSymbol(opening))
-        state.start_measure()
-        for event in measure:
-            tokens.extend(tokens_for_event(event, unresolved, state))
-        tokens.append(EncodedSymbol(closing or "barline"))
     return tokens
+
+
+def _measure_tokens(
+    measure: list[dict], unresolved: collections.Counter, state: EngravingState
+) -> list[EncodedSymbol]:
+    opening = next((e["open"] for e in measure if e.get("open")), None)
+    closing = next((e["close"] for e in measure if e.get("close")), None)
+    tokens = [EncodedSymbol(opening)] if opening else []
+    state.start_measure()
+    for event in measure:
+        tokens.extend(tokens_for_event(event, unresolved, state))
+    tokens.append(EncodedSymbol(closing or "barline"))
+    return tokens
+
+
+# What reading the page changed, tallied over a run and reported at the end.
+page_report: collections.Counter = collections.Counter()
+
+
+def _is_head(token: EncodedSymbol) -> bool:
+    """A note printed at full size; grace notes are small."""
+    return token.rhythm.startswith("note") and not token.rhythm.endswith("G")
+
+
+def _staff_cuts(
+    body: list[EncodedSymbol],
+    ends: list[int],
+    staves: list[dict],
+    counts: list[int],
+    fits: "collections.abc.Callable[[int, int, int], bool]",
+) -> list[tuple[int, int]]:
+    """Where each staff's labels start and end in the work's token stream.
+
+    Counting barlines is the obvious guide and usually right, but one missed or
+    extra barline moves every later staff by a measure: the staff then carries
+    labels for notes it does not show, and its neighbour for notes it does. And
+    in the long usuls a measure does not always fit on one line; Mus2 breaks it
+    and carries the rest over to the next staff.
+
+    So each staff is given exactly as many notes as the page prints on it,
+    trying in turn: a cut at a barline (the one nearest the barline count, when
+    a measure of rests lets several qualify), then a cut inside a measure, and
+    only then the barline count alone. A cut is taken only if the notes it
+    gives the staff match the page pitch for pitch, so one unreadable staff
+    costs itself and not the staffs after it.
+    """
+    heads_before = [0]
+    for token in body:
+        heads_before.append(heads_before[-1] + _is_head(token))
+    cuts, start = [], 0
+    for index, staff in enumerate(staves):
+        first = next((m for m, end in enumerate(ends) if end > start), len(ends) - 1)
+        guide = ends[min(first + max(len(staff["bars"]) - 1, 0), len(ends) - 1)]
+        if index == len(staves) - 1:
+            candidates = [len(body)]
+        else:
+            wanted = heads_before[start] + counts[index]
+            at_barline = sorted(
+                (end for end in ends if end > start and heads_before[end] == wanted),
+                key=lambda end: (abs(end - guide), end),
+            )
+            inside = [
+                k
+                for k in range(start + 1, len(body) + 1)
+                if heads_before[k] == wanted and _is_head(body[k - 1])
+            ][:1]
+            candidates = [*at_barline, *inside, guide]
+        end = next((c for c in candidates if fits(index, start, c)), candidates[-1])
+        if end not in ends:
+            page_report["staffs ending inside a measure"] += 1
+        elif end != guide:
+            page_report["staffs given other measures than the barline count says"] += 1
+        cuts.append((start, end))
+        start = end
+    return cuts
+
+
+def _signs_from_page(
+    tokens: list[EncodedSymbol], where: list[int | None], heads: list[dict]
+) -> list[EncodedSymbol]:
+    """Label each note with the sign the page draws before it."""
+    result, number = [], 0
+    for token in tokens:
+        if token.rhythm.startswith("note"):
+            head = where[number]
+            number += 1
+            if head is not None:
+                drawn = heads[head]["lift"] or empty
+                if drawn != token.lift:
+                    page_report[f"sign {token.lift} -> {drawn}"] += 1
+                    token = token.change_lift(drawn)
+        result.append(token)
+    return result
 
 
 def _index_line(base: str) -> str:
@@ -695,6 +774,14 @@ def convert_work(
 ) -> list[str]:
     """Cut one work into staff samples. Raises SkippedWork if it cannot align."""
     import fitz  # noqa: PLC0415
+
+    # Imported here: page_notes itself builds on this module.
+    from training.datasets.page_notes import (  # noqa: PLC0415
+        full_size,
+        pair_notes,
+        read_staff,
+        uses_usual_encoding,
+    )
 
     mu2_path = os.path.join(symbtr_mu2, (mu2_stem or stem) + ".mu2")
     if not os.path.exists(mu2_path):
@@ -727,20 +814,44 @@ def convert_work(
                 f"{len(measures)} measures in the .mu2 but {page_measures} on the page"
             )
 
+        # The whole work as one stream of labels, then cut into staffs. The
+        # engraving state runs through it in order, as the reader's eye does.
+        body: list[EncodedSymbol] = []
+        ends: list[int] = []
+        for measure in measures:
+            body.extend(_measure_tokens(measure, unresolved, state))
+            ends.append(len(body))
+
+        heads = [read_staff(document[staff["page"]], staff["lines"]) for staff in staves]
+
+        def notes_of(start: int, end: int) -> list[tuple[str, str]]:
+            return [(t.rhythm, t.pitch) for t in body[start:end] if t.rhythm.startswith("note")]
+
+        def fits(index: int, start: int, end: int) -> bool:
+            return pair_notes(notes_of(start, end), heads[index]) is not None
+
+        cuts = _staff_cuts(body, ends, staves, [len(full_size(h)) for h in heads], fits)
+        # Signs are read off the page only where its characters use the usual
+        # codes; elsewhere the .mu2 reckoning stands.
+        signs_readable = uses_usual_encoding(document)
+        if not signs_readable:
+            page_report["works whose signs cannot be read off the page"] += 1
+
         os.makedirs(working_dir, exist_ok=True)
         lines = []
-        taken = 0
-        for index, staff in enumerate(staves):
-            is_last = index == len(staves) - 1
-            mine = (
-                measures[taken:]
-                if is_last
-                else measures[taken : taken + len(staff["bars"])]
-            )
-            taken += len(mine)
-            tokens = _staff_tokens(mine, score, index == 0, unresolved, state)
-            if not tokens:
+        for index, (staff, (start, end)) in enumerate(zip(staves, cuts)):
+            if start == end:
                 continue
+            tokens = _header(score, state, index == 0) + body[start:end]
+            where = pair_notes(notes_of(start, end), heads[index])
+            if where is None:
+                # The page prints different notes from the ones labelled. The
+                # model would be taught to see what is not there; leave it out.
+                page_report["staffs left out, notes differ from the page"] += 1
+                continue
+            if signs_readable:
+                tokens = _signs_from_page(tokens, where, heads[index])
+            page_report["staffs kept"] += 1
             base = os.path.join(working_dir, f"{stem}-{index:02d}")
             page = document[staff["page"]]
             if not just_token_files:
@@ -908,8 +1019,36 @@ def _lift_histogram(lines: list[str]) -> collections.Counter:
     return counts
 
 
-def write_splits(lines: list[str]) -> None:
-    splits = split_and_balance(lines)
+def previous_split() -> dict[str, str]:
+    """Which split each work went to last time, read from the index files."""
+    placed = {}
+    for name, path in (("train", index_train), ("val", index_val), ("test", index_test)):
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                for line in handle:
+                    if line.strip():
+                        placed[_work_of(line)] = name
+    return placed
+
+
+def split_as_before(lines: list[str], placed: dict[str, str], seed: int = 0) -> dict[str, list[str]]:
+    """Keep every work in the split it was in, so two datasets can be compared.
+
+    A test set that changed its works along with its labels would measure the
+    new works, not the new labels. A work that was not there before goes to
+    training.
+    """
+    splits: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    for line in lines:
+        splits[placed.get(_work_of(line), "train")].append(line)
+    rng = random.Random(seed)
+    splits["train"] += _oversample(splits["train"], rng)
+    rng.shuffle(splits["train"])
+    return splits
+
+
+def write_splits(lines: list[str], placed: dict[str, str] | None = None) -> None:
+    splits = split_as_before(lines, placed) if placed else split_and_balance(lines)
     for name, path in (("train", index_train), ("val", index_val), ("test", index_test)):
         with open(path, "w", encoding="utf-8") as handle:
             handle.writelines(splits[name])
@@ -929,7 +1068,11 @@ def write_splits(lines: list[str]) -> None:
 # --- entry point ------------------------------------------------------------
 
 
-def convert_symbtr(just_token_files: bool = False, limit: int | None = None) -> list[str]:
+def convert_symbtr(
+    just_token_files: bool = False,
+    limit: int | None = None,
+    placed: dict[str, str] | None = None,
+) -> list[str]:
     if not os.path.isdir(symbtr_pdf):
         eprint(f"SymbTr pdf folder not found at {symbtr_pdf}")
         sys.exit(1)
@@ -962,6 +1105,9 @@ def convert_symbtr(just_token_files: bool = False, limit: int | None = None) -> 
         eprint(f"  skipped {count}: {reason}")
     if unresolved:
         eprint(f"  durations that could not be written: {dict(unresolved.most_common(6))}")
+    eprint("What the page changed:")
+    for what, count in sorted(page_report.items(), key=lambda kv: (kv[0].startswith("sign"), -kv[1])):
+        eprint(f"  {count:>7}  {what}")
 
     os.makedirs(working_dir, exist_ok=True)
     with open(os.path.join(working_dir, "skipped.txt"), "w", encoding="utf-8") as handle:
@@ -969,7 +1115,7 @@ def convert_symbtr(just_token_files: bool = False, limit: int | None = None) -> 
     with open(index_file, "w", encoding="utf-8") as handle:
         handle.writelines(lines)
     eprint(f"Wrote index with {len(lines)} entries to {index_file}")
-    write_splits(lines)
+    write_splits(lines, placed)
     return lines
 
 
@@ -998,16 +1144,38 @@ if __name__ == "__main__":
         action="store_true",
         help="Rebuild index.txt and the splits from the already converted staff files.",
     )
+    parser.add_argument(
+        "--work-dir",
+        default=None,
+        help="Write the staff files here instead of datasets/SymbTr-work, leaving "
+             "an earlier conversion where it is.",
+    )
+    parser.add_argument(
+        "--keep-split",
+        action="store_true",
+        help="Put every work in the split the current index files put it in.",
+    )
     args = parser.parse_args()
     random.seed(0)
+    placed = previous_split() if args.keep_split else None
+    if args.work_dir:
+        # The index files are about to be rewritten to point at the new folder;
+        # keep the old ones beside them, named after the folder they point at.
+        before = os.path.basename(working_dir)
+        for path in (index_file, index_train, index_val, index_test):
+            kept = path[: -len(".txt")] + f"_{before}.txt"
+            if os.path.exists(path) and not os.path.exists(kept):
+                shutil.copy(path, kept)
+                eprint(f"Kept the previous {os.path.basename(path)} as {os.path.basename(kept)}")
+        working_dir = os.path.join(dataset_root, args.work_dir)
     if args.reindex:
         rebuilt = reindex()
         with open(index_file, "w", encoding="utf-8") as handle:
             handle.writelines(rebuilt)
         eprint(f"Rebuilt index with {len(rebuilt)} entries from {working_dir}")
-        write_splits(rebuilt)
+        write_splits(rebuilt, placed)
     elif args.split_only:
         with open(index_file, encoding="utf-8") as handle:
-            write_splits(handle.readlines())
+            write_splits(handle.readlines(), placed)
     else:
-        convert_symbtr(just_token_files=args.only_tokens, limit=args.limit)
+        convert_symbtr(just_token_files=args.only_tokens, limit=args.limit, placed=placed)

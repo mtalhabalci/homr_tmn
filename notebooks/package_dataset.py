@@ -29,7 +29,7 @@ from training.datasets.convert_symbtr import (
 git_root = Path(__file__).parent.parent.absolute()
 
 
-def package(destination: str) -> None:
+def package(destination: str, working_dir: str = working_dir) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(destination)), exist_ok=True)
     if not os.path.isdir(working_dir):
         eprint(f"Nothing to package: {working_dir} does not exist.")
@@ -67,4 +67,11 @@ if __name__ == "__main__":
         default=str(git_root.parent / "colab" / "symbtr_veri.tar.gz"),
         help="Where to write the archive.",
     )
-    package(parser.parse_args().out)
+    parser.add_argument(
+        "--work-dir",
+        default=None,
+        help="Folder under datasets/ holding the staff files, if not SymbTr-work.",
+    )
+    options = parser.parse_args()
+    folder = os.path.join(git_root, "datasets", options.work_dir) if options.work_dir else working_dir
+    package(options.out, folder)
