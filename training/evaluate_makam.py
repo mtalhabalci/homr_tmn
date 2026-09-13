@@ -299,6 +299,10 @@ def evaluate(
     eprint(f"   invented (blank read as): {invented}")
     if real:
         eprint(f"   caught                  : {100 * (real - dropped) / real:.1f}%")
+    _report_meters(
+        {names["rhythm"].get(i, ""): n for i, n in truth["rhythm"].items()},
+        {names["rhythm"].get(i, ""): n for i, n in hits["rhythm"].items()},
+    )
 
     if by_place:
         eprint("\n=== accidentals, in the signature and among the notes ===")
@@ -495,6 +499,8 @@ def evaluate_generated(
     accidental_truth: collections.Counter = collections.Counter()
     accidental_hit: collections.Counter = collections.Counter()
     accidental_said: collections.Counter = collections.Counter()
+    meter_truth: collections.Counter = collections.Counter()
+    meter_hit: collections.Counter = collections.Counter()
     clean_staffs = 0
     staffs = 0
 
@@ -541,6 +547,10 @@ def evaluate_generated(
                     notes += 1
                     if actual == predicted:
                         notes_ok += 1
+                if actual[0].startswith("timeSignature"):
+                    meter_truth[actual[0]] += 1
+                    if predicted is not None and predicted[0] == actual[0]:
+                        meter_hit[actual[0]] += 1
                 if lift_is_symbol(actual[2]):
                     accidental_truth[actual[2]] += 1
                     if predicted is not None and predicted[2] == actual[2]:
@@ -587,6 +597,21 @@ def evaluate_generated(
         seen_all = sum(accidental_truth.values())
         got_all = sum(accidental_hit.values())
         eprint(f"{'TOTAL':<12}{seen_all:>9}{got_all:>8}{100 * got_all / seen_all:>8.1f}%")
+    _report_meters(meter_truth, meter_hit)
+
+
+def _report_meters(truth: dict, hits: dict) -> None:
+    """The usul is printed once per work, so it hides among thousands of notes."""
+    meters = {name: n for name, n in truth.items() if name.startswith("timeSignature")}
+    if not meters:
+        return
+    seen = sum(meters.values())
+    got = sum(hits.get(name, 0) for name in meters)
+    eprint(f"\n=== time signatures: {got}/{seen} = {100 * got / seen:.1f}% ===")
+    missed = sorted(((name, n - hits.get(name, 0)) for name, n in meters.items() if hits.get(name, 0) < n),
+                    key=lambda kv: -kv[1])
+    if missed:
+        eprint("   misread: " + ", ".join(f"{name[14:]} x{n}" for name, n in missed[:12]))
 
 def lift_is_symbol(name: str) -> bool:
     return name.startswith(("sharp", "flat")) or name == "N"

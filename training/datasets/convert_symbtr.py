@@ -1395,9 +1395,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--add-train",
-        default=None,
+        action="append",
+        default=[],
         help="An index of extra staffs, such as the courtesy-accidental ones, to "
-             "train on besides the corpus. Used with --split-only.",
+             "train on besides the corpus. May be repeated. Used with --split-only.",
     )
     args = parser.parse_args()
     random.seed(0)
@@ -1425,12 +1426,12 @@ if __name__ == "__main__":
     elif args.split_only:
         with open(index_file, encoding="utf-8") as handle:
             corpus = handle.readlines()
-        if args.add_train:
+        for extra_index in args.add_train:
             # Their names are not works of the corpus, so split_as_before puts
             # them in training -- which is also the only place they may go.
-            with open(args.add_train, encoding="utf-8") as handle:
+            with open(extra_index, encoding="utf-8") as handle:
                 extra = [line for line in handle if line.strip()]
-            eprint(f"Adding {len(extra)} staffs from {args.add_train} to training")
+            eprint(f"Adding {len(extra)} staffs from {extra_index} to training")
             corpus += extra
         write_splits(corpus, placed)
     else:

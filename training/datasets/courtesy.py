@@ -228,6 +228,9 @@ def staves_of(index: str) -> dict[str, list[tuple[int, str, str]]]:
         image, tokens = line.strip().split(",")
         name = os.path.basename(tokens)[: -len(".tokens")]
         match = STAFF.search(name)
+        # Only staffs cut from a page; the ones drawn for training name no pdf.
+        if match is None or not os.path.exists(os.path.join(symbtr_pdf, name[: match.start()] + ".pdf")):
+            continue
         works[name[: match.start()]].append((int(match.group(1)), image, tokens))
     return {work: sorted(staves) for work, staves in works.items()}
 
