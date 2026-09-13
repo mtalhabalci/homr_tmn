@@ -177,6 +177,45 @@ def _dilate(mask: np.ndarray, by: int) -> np.ndarray:
     return grown
 
 
+def without_text(page: fitz.Page, clip: fitz.Rect, dpi: int) -> np.ndarray:
+    """The staff with every character gone and every line kept -- what lies under a sign.
+
+    This redacts the page it is given. Taking a single character out of a Mus2
+    pdf is not safe: MuPDF, rewriting the line, can shift the characters after
+    it, and a flag Mus2 set on its notehead's spot moves off it, so the note is
+    drawn twice. Taking all of them out leaves nothing to shift. Characters are
+    taken off a rendered staff with take_off instead.
+    """
+    page.add_redact_annot(clip)
+    page.apply_redactions(
+        images=fitz.PDF_REDACT_IMAGE_NONE,
+        graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+        text=fitz.PDF_REDACT_TEXT_REMOVE,
+    )
+    return _pixels(page, clip, dpi)
+
+
+def glyph_tint(
+    original: np.ndarray, size: tuple[float, float], clip: fitz.Rect, dpi: int, buffer: bytes, code: int,
+    origin: tuple[float, float], font_size: float,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """A character's ink and everything it tints, drawn alone from the pdf's own font.
+
+    None if what is drawn does not fall on the page's own ink: then it is not
+    the same character in the same place.
+    """
+    grey = sign_pixels(size, clip, dpi, buffer, code, origin, font_size).min(axis=2)
+    ink = grey < INK
+    if not ink.any() or (original.min(axis=2)[ink] >= INK).mean() > 0.02:
+        return None
+    return ink, grey < 250
+
+
+def take_off(original: np.ndarray, bare: np.ndarray, tint: np.ndarray) -> np.ndarray:
+    """The staff with the tinted pixels replaced by what lies under them."""
+    return np.where(_dilate(tint, 1)[..., None], bare, original).astype(np.uint8)
+
+
 def draw_signs(
     page: fitz.Page, lines: list[float], heads: list[dict], wanted: list[tuple[int, str]],
     fonts: list[bytes], donors: dict[int, bytes], limit: int,

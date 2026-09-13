@@ -6,8 +6,8 @@ common ones and guesses the rest: 13/4, 14/8, 15/8 and 16/8 all came out as
 10/8, and 16/8 and 15/8 are not in the training works at all.
 
 The digits are only digits, and Mus2 sets them the same way whatever they
-say. So a first staff is rendered with its own time signature taken out of
-the pdf -- the characters removed, the staff lines left -- and another set in
+say. So a first staff is rendered with its own time signature taken off --
+the digits' pixels replaced by the staff lines under them -- and another set in
 its place in Mus2's own digits, centred where the old ones stood, the upper
 number on the upper half of the staff and the lower on the lower half. The
 label changes by that one symbol. The notes that follow no longer fill the
@@ -38,7 +38,19 @@ from training.datasets.convert_symbtr import (
     symbtr_pdf,
     target_page_width,
 )
-from training.datasets.courtesy import CLEARANCE, INK, MARGIN, _dilate, _mus2_fonts, _pixels, staves_of  # noqa: F401
+from training.datasets.courtesy import (
+    CLEARANCE,
+    INK,
+    MARGIN,
+    _dilate,
+    _mus2_fonts,
+    _pixels,
+    font_with,
+    glyph_tint,
+    staves_of,
+    take_off,
+    without_text,
+)
 from training.datasets.page_notes import read_staff, uses_usual_encoding
 
 TARGETS = [f"{n}/{d}" for n in _time_numerators for d in _time_denominators]
@@ -92,34 +104,32 @@ def set_number(page: fitz.Page, text: str, centre: float, baseline: float, size:
 
 def new_first_staff(path: str, lines: list[float], page_number: int, digits: list[dict], meter: str,
                     fonts: dict[str, bytes]) -> np.ndarray | None:
-    """The first staff with its time signature replaced, or None if it will not fit cleanly."""
+    """The first staff with its time signature replaced, or None if it will not fit cleanly.
+
+    The old digits are taken off the rendered staff, not out of the pdf: see
+    without_text for what removing characters from the pdf did to the notes.
+    """
     middle = (lines[0] + lines[-1]) / 2
     upper = [d for d in digits if d["origin"][1] <= middle + 0.5]
     lower = [d for d in digits if d["origin"][1] > middle + 0.5]
     if not upper or not lower:
         return None
-    def characters(page: fitz.Page, clip: fitz.Rect) -> list[dict]:
-        return [c for b in page.get_text("rawdict", clip=clip)["blocks"] for l in b.get("lines", [])
-                for s in l["spans"] for c in s.get("chars", []) if c["c"].strip()]
-
     with fitz.open(path) as document:
         page = document[page_number]
         clip = fitz.Rect(0, lines[0] - MARGIN, page.rect.width, lines[-1] + MARGIN)
         dpi = round(target_page_width / page.rect.width * 72)
-        before = characters(page, clip)
-        for digit in digits:
-            page.add_redact_annot(digit["bbox"])
-        page.apply_redactions(
-            images=fitz.PDF_REDACT_IMAGE_NONE,
-            graphics=fitz.PDF_REDACT_LINE_ART_NONE,
-            text=fitz.PDF_REDACT_TEXT_REMOVE,
-        )
-        # The removal must take the digits and nothing else: a signature sign
-        # whose box reaches into a digit's would go with it.
-        if len(characters(page, clip)) != len(before) - len(digits):
-            return None
-        base = _pixels(page, clip, dpi).copy()
         size = page.rect.width, page.rect.height
+        own = _mus2_fonts(document)
+        original = _pixels(page, clip, dpi).copy()
+        bare = without_text(page, clip, dpi)
+    tint = np.zeros(original.shape[:2], dtype=bool)
+    for digit in digits:
+        buffer = font_with(own, ord(digit["c"]))
+        drawn = buffer and glyph_tint(original, size, clip, dpi, buffer, ord(digit["c"]), digit["origin"], digit["size"])
+        if not drawn:
+            return None
+        tint |= drawn[1]
+    base = take_off(original, bare, tint)
     # The new digits alone, laid over the emptied staff.
     blank = fitz.open()
     sheet = blank.new_page(width=size[0], height=size[1])
