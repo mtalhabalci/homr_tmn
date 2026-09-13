@@ -128,10 +128,15 @@ def free_candidates(rows: list[list[str]]) -> list[tuple[int, str]]:
 
 
 def _mus2_fonts(document: fitz.Document) -> list[bytes]:
+    """The pdf's copies of Mus2 that follow the usual codes.
+
+    The CID-keyed copy some pdfs also carry numbers its signs differently, so
+    asking it for a code could draw a different sign from the one labelled.
+    """
     buffers = []
     for page in document:
         for xref, _, _, base, _, _, _ in page.get_fonts(full=True):
-            if "Mus2" in base:
+            if "Mus2" in base and "Identity" not in base:
                 buffer = document.extract_font(xref)[3]
                 if buffer and buffer not in buffers:
                     buffers.append(buffer)

@@ -13,7 +13,7 @@ height alone, and the sign in front of it from the character just to its left.
 
 import fitz
 
-from training.datasets.convert_symbtr import ACCIDENTAL_GLYPHS, NOTEHEAD_GLYPHS, _key_signature_glyphs
+from training.datasets.convert_symbtr import ACCIDENTAL_GLYPHS, NOTEHEAD_GLYPHS, _staff_lines
 from training.datasets.shift_staff import MARGIN, _characters, _degree
 
 NATURAL = 0x6E
@@ -31,13 +31,32 @@ REACH = 5
 LEDGER_REACH = 9
 
 
+# About one pdf in ten embeds a second, CID-keyed copy of Mus2 whose text layer
+# numbers a few signs differently. Read against the .mu2 labels over 199 such
+# works, each of these stands before notes and in signatures carrying one sign
+# only (0xC8 7 of 7, 0xF7 118 of 118, 0xD8 4 of 4, 0xC7 10 of 12). The 2-comma
+# flat arrives as 0x71, which everywhere else is the treble clef; the clef is
+# set smaller and never next to a note, see is_clef.
+EXTRA_ACCIDENTALS = {0xC8: 2, 0xD8: -4, 0xF7: -1, 0xC7: -3, 0x71: -2}
+TREBLE_CLEF = 0x71
+
+
 def lift_of_glyph(code: int) -> str | None:
     if code == NATURAL:
         return "N"
-    commas = ACCIDENTAL_GLYPHS.get(code)
+    commas = ACCIDENTAL_GLYPHS.get(code, EXTRA_ACCIDENTALS.get(code))
     if commas is None:
         return None
     return f"sharp{commas}" if commas > 0 else f"flat{-commas}"
+
+
+def is_clef(glyph: dict, staff: list[float]) -> bool:
+    """The treble clef, which shares a code with the other copy's 2-comma flat.
+
+    A clef is set at the size of the notes and curls round the G line; a
+    signature flat is set larger, and one among the notes stands at a note.
+    """
+    return glyph["code"] == TREBLE_CLEF and glyph["size"] < 23
 
 
 def pitch_at(y: float, bottom: float, step: float) -> str:
@@ -46,19 +65,34 @@ def pitch_at(y: float, bottom: float, step: float) -> str:
 
 
 def uses_usual_encoding(document: "fitz.Document") -> bool:
-    """False for the pdfs whose Mus2 characters do not follow the usual codes.
+    """False for a pdf whose signs this cannot read by their codes.
 
-    About one work in eight embeds Mus2 as a CID font or otherwise renumbers
-    its characters: the 2-comma sharp arrives as 0xC8, the 2-comma flat as the
-    code that is the treble clef everywhere else. Noteheads still read right
-    there, but accidentals cannot be read by code, so the page is not trusted
-    for them.
+    About one work in eight embeds a second, CID-keyed copy of Mus2 that
+    numbers a few signs differently; those codes are in EXTRA_ACCIDENTALS.
+    What is left to catch is a signature sign whose code means nothing here:
+    then the page is not trusted for signs at all.
     """
-    for page in document:
-        for font in page.get_fonts(full=True):
-            if "Mus2" in font[3] and "Identity" in font[3]:
-                return False
-    return _key_signature_glyphs(document) is not None
+    page = document[0]
+    staves = _staff_lines(page)
+    if not staves:
+        return False
+    staff = staves[0]
+    heads = read_staff(page, staff)
+    if not heads:
+        return False
+    top, bottom = staff[0], staff[-1]
+    step = (bottom - top) / 8
+    band = fitz.Rect(0, top - MARGIN, page.rect.width, bottom + MARGIN)
+    for glyph in _characters(page, band):
+        if not glyph["notation"] or glyph["x"] >= heads[0]["x"] - REACH * step:
+            continue
+        # Signature signs stand on the staff and are set larger than the clef
+        # and the time signature; a segno above the staff is no sign.
+        if not top - 2 * step <= glyph["origin"][1] <= bottom + 2 * step:
+            continue
+        if glyph["size"] >= 23 and not glyph["char"].isdigit() and not lift_of_glyph(glyph["code"]):
+            return False
+    return True
 
 
 def read_staff(page: "fitz.Page", staff: list[float]) -> list[dict]:
@@ -135,7 +169,7 @@ def key_signature(page: "fitz.Page", staff: list[float], heads: list[dict]) -> l
     found: list[dict] = []
     for glyph in _characters(page, band):
         lift = lift_of_glyph(glyph["code"]) if glyph["notation"] else None
-        if not lift or lift == "N" or glyph["x"] >= limit:
+        if not lift or lift == "N" or glyph["x"] >= limit or is_clef(glyph, staff):
             continue
         y = glyph["origin"][1]
         if not top - 4 * step <= y <= bottom + 4 * step:

@@ -143,6 +143,9 @@ def staves_by_work(indexes: list[str]) -> dict[str, list[tuple[int, str]]]:
             tokens = line.strip().split(",")[1]
             name = os.path.basename(tokens)[: -len(".tokens")]
             match = STAFF.search(name)
+            # Staffs drawn for training, such as the courtesy ones, are not pages.
+            if match is None:
+                continue
             works[name[: match.start()]].add((int(match.group(1)), tokens))
     return {work: sorted(staves) for work, staves in works.items()}
 
