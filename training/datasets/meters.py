@@ -144,6 +144,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--split", choices=("train", "val", "test"), required=True)
     parser.add_argument("--per-class", type=int, default=40, help="Staffs drawn for each time signature.")
+    parser.add_argument(
+        "--rare-per-class", type=int, default=None,
+        help="Staffs for the signatures Turkish scores hardly use -- a half or a sixteenth "
+             "as the beat, or one beat to the measure. Defaults to --per-class.",
+    )
     parser.add_argument("--seed", type=int, default=0)
     options = parser.parse_args()
 
@@ -178,9 +183,17 @@ def main() -> None:
 
     made: collections.Counter = collections.Counter()
     lines_out = []
+
+    def wanted(meter: str) -> int:
+        numerator, denominator = (int(part) for part in meter.split("/"))
+        rare = denominator in (2, 16) or numerator == 1
+        if rare and options.rare_per_class is not None:
+            return options.rare_per_class
+        return options.per_class
+
     for meter in TARGETS:
-        for attempt in range(options.per_class * 4):
-            if made[meter] >= options.per_class:
+        for attempt in range(wanted(meter) * 4):
+            if made[meter] >= wanted(meter):
                 break
             work, path, page_number, lines, digits, tokens = rng.choice(firsts)
             rows = [l.split() for l in open(os.path.join(git_root, tokens), encoding="utf-8") if l.split()]
@@ -201,7 +214,7 @@ def main() -> None:
             lines_out.append(f"{rel(base + '.png')},{rel(base + '.tokens')}\n")
     with open(os.path.join(out_root, f"index_{options.split}.txt"), "w", encoding="utf-8") as handle:
         handle.writelines(lines_out)
-    short = [meter for meter in TARGETS if made[meter] < options.per_class]
+    short = [meter for meter in TARGETS if made[meter] < wanted(meter)]
     eprint(f"{len(lines_out)} staffs across {len(TARGETS)} time signatures; short of target: {short}")
 
 
