@@ -225,7 +225,9 @@ def read_mu2(path: str) -> Mu2Score:
     key = ""
     events: list[dict] = []
     pending_open: str | None = None
-    for line in lines[1:]:
+    # Each event remembers its line in the file, so a disagreement with the
+    # page can be reported where the .mu2 can be corrected.
+    for row, line in enumerate(lines[1:], start=2):
         fields = line.split("\t")
         if len(fields) < 9:
             continue
@@ -267,7 +269,7 @@ def read_mu2(path: str) -> Mu2Score:
                 pending_open = open_mark
             continue
         if code in GRACE_CODES:
-            grace = {"name": fields[1].strip(), "duration": Fraction(0), "grace": True}
+            grace = {"name": fields[1].strip(), "duration": Fraction(0), "grace": True, "row": row}
             if marks:
                 grace["open"], grace["close"] = marks
             events.append(grace)
@@ -279,6 +281,7 @@ def read_mu2(path: str) -> Mu2Score:
             "name": fields[1].strip(),
             "duration": Fraction(int(numerator), int(denominator)),
             "grace": False,
+            "row": row,
         }
         if pending_open or marks:
             here = marks or (None, None)
@@ -428,11 +431,12 @@ def tokens_for_event(
             articulation = "tieStart"
         else:
             articulation = "tieStop"
-        symbols.append(
-            EncodedSymbol(
-                f"note_{kern}", pitch[0], lift if index == 0 else "_", articulation, "upper"
-            )
+        symbol = EncodedSymbol(
+            f"note_{kern}", pitch[0], lift if index == 0 else "_", articulation, "upper"
         )
+        # Where the note came from, for the report on page and .mu2 disagreeing.
+        symbol.source = (event.get("row"), event["name"], pitch[1], bool(event["grace"]))
+        symbols.append(symbol)
     return symbols
 
 
@@ -810,6 +814,9 @@ def _splits_from_page(
             result[notes[g]] = EncodedSymbol(
                 f"note_{base}{'.' * dots}", old.pitch, old.lift, old.articulation, old.position
             )
+            for extra in ("source", "measure"):
+                if hasattr(old, extra):
+                    setattr(result[notes[g]], extra, getattr(old, extra))
         page_report["tied notes split the way the page splits them"] += 1
     return result
 
@@ -1029,6 +1036,7 @@ def convert_work(
             raise SkippedWork("no staves found on the page")
 
         measures = _cut_into_measures(score)
+        mu2_key = score.key
         # One state for the whole work: the key signature holds throughout and
         # a measure's accidentals carry on across a system break.
         score.key = printed_key_signature(document, score.key)
@@ -1044,8 +1052,11 @@ def convert_work(
         # engraving state runs through it in order, as the reader's eye does.
         body: list[EncodedSymbol] = []
         ends: list[int] = []
-        for measure in measures:
-            body.extend(_measure_tokens(measure, unresolved, state))
+        for number, measure in enumerate(measures, start=1):
+            for token in _measure_tokens(measure, unresolved, state):
+                if token.rhythm.startswith("note"):
+                    token.measure = number
+                body.append(token)
             ends.append(len(body))
 
         heads = [read_staff(document[staff["page"]], staff["lines"]) for staff in staves]
@@ -1065,6 +1076,7 @@ def convert_work(
 
         os.makedirs(working_dir, exist_ok=True)
         lines = []
+        kept, left_out = [], []
         for index, (staff, (start, end)) in enumerate(zip(staves, cuts)):
             if start == end:
                 continue
@@ -1074,6 +1086,7 @@ def convert_work(
                 # The page prints different notes from the ones labelled. The
                 # model would be taught to see what is not there; leave it out.
                 page_report["staffs left out, notes differ from the page"] += 1
+                left_out.append((index, body[start:end], heads[index]))
                 continue
             if signs_readable:
                 tokens = _signature_from_page(
@@ -1101,9 +1114,120 @@ def convert_work(
                 for token in tokens:
                     token_file.write(str(token) + "\n")
             lines.append(_index_line(base))
+            kept.append((index, tokens))
+        if comparison is not None:
+            first = document[staves[0]["page"]]
+            printed_time = time_signature(first, staves[0]["lines"], heads[0])
+            _compare_with_page(stem, staves, kept, left_out, mu2_key, score, printed_time)
         return lines
     finally:
         document.close()
+
+
+# Set to {"notes": [], "keys": [], "times": [], "staffs": []} to collect where
+# the page and the .mu2 disagree; training/symbtr_report.py does this.
+comparison: dict | None = None
+
+_LETTER_NAMES = {letter: name.capitalize() for name, letter in TURKISH_NOTE_NAMES.items()}
+
+
+def _named(pitch: str, commas: int) -> str:
+    """A pitch the way the .mu2 writes it: Fa5#4, Si4b1, Re5."""
+    name = f"{_LETTER_NAMES[pitch[0]]}{pitch[1:]}"
+    if commas > 0:
+        return f"{name}#{commas}"
+    if commas < 0:
+        return f"{name}b{-commas}"
+    return name
+
+
+def _signature_commas(entries: list[tuple[str, int]]) -> dict[str, int]:
+    return {pitch[0]: commas for pitch, commas in entries}
+
+
+def _agrees(page: int, mu2: int) -> bool:
+    """Equal, or the page shows the AEU sign the score rounds this value to."""
+    return page == mu2 or page == NEAREST_AEU.get(mu2)
+
+
+def _compare_with_page(  # noqa: PLR0913
+    stem: str,
+    staves: list[dict],
+    kept: list[tuple[int, list[EncodedSymbol]]],
+    left_out: list[tuple[int, list[EncodedSymbol], list[dict]]],
+    mu2_key: str,
+    score: Mu2Score,
+    printed_time: str | None,
+) -> None:
+    """Note what the page shows differently from the .mu2: a sounding pitch,
+    the key signature, the time signature, or a staff's very notes."""
+    from homr.makam_key import commas_for_lift, resolve_sounding  # noqa: PLC0415
+
+    def where_on_page(index: int) -> tuple[int, int]:
+        page = staves[index]["page"]
+        line = sum(1 for other in staves[:index] if other["page"] == page) + 1
+        return page + 1, line
+
+    mu2_signature = _signature_commas(
+        [parsed for parsed in (parse_note_name(part.strip()) for part in mu2_key.split("/") if part.strip()) if parsed]
+    )
+    page_signature: dict[str, int] = {}
+    if kept:
+        printed = [(t.pitch, commas_for_lift(t.lift)) for t in kept[0][1] if t.rhythm == key_accidental]
+        page_signature = _signature_commas([(p, c) for p, c in printed if c is not None])
+        letters = set(page_signature) | set(mu2_signature)
+        if not all(_agrees(page_signature.get(l, 0), mu2_signature.get(l, 0)) for l in letters):
+            comparison["keys"].append({
+                "work": stem,
+                "mu2_key_signature": mu2_key or "(none)",
+                "pdf_key_signature": "/".join(_named(p, c) for p, c in printed) or "(none)",
+            })
+    mu2_time = f"{score.numerator}/{score.denominator}"
+    if printed_time and printed_time[len("timeSignature_"):] != mu2_time:
+        comparison["times"].append({
+            "work": stem, "mu2_time_signature": mu2_time, "pdf_time_signature": printed_time[len("timeSignature_"):],
+        })
+
+    stream, places = [], []
+    for index, tokens in kept:
+        stream += tokens
+        places += [index] * len(tokens)
+    for symbol, index in zip(resolve_sounding(stream), places):
+        source = getattr(symbol, "source", None)
+        if not source or not symbol.rhythm.startswith("note") or "tieStop" in symbol.articulation:
+            continue
+        row, name, mu2_commas, grace = source
+        if grace:
+            # Signs on grace notes are not read off the page.
+            continue
+        page_commas = commas_for_lift(symbol.sounding) if symbol.sounding else 0
+        if page_commas is None or _agrees(page_commas, mu2_commas):
+            continue
+        drawn = commas_for_lift(symbol.lift)
+        if drawn is not None:
+            shown = _named(symbol.pitch, drawn)[len(_LETTER_NAMES[symbol.pitch[0]]) + 1:] or "natural"
+            cause = f"pdf prints a sign before this note: {shown}"
+        elif not _agrees(page_signature.get(symbol.pitch[0], 0), mu2_signature.get(symbol.pitch[0], 0)):
+            cause = "pdf prints no sign here, and its key signature differs from the .mu2 for this note name"
+        else:
+            cause = "pdf prints no sign here; by its key signature and the measure so far it sounds as shown"
+        page, line = where_on_page(index)
+        comparison["notes"].append({
+            "work": stem, "pdf_page": page, "staff_on_page": line, "measure": getattr(symbol, "measure", ""),
+            "mu2_row": row, "mu2_note": name, "pdf_sounds": _named(symbol.pitch, page_commas), "cause": cause,
+        })
+
+    for index, notes, heads in left_out:
+        page, line = where_on_page(index)
+        mu2_notes = [t.source[1] for t in notes if t.rhythm.startswith("note") and hasattr(t, "source")
+                     and "tieStop" not in t.articulation]
+        rows = [t.source[0] for t in notes if hasattr(t, "source")]
+        comparison["staffs"].append({
+            "work": stem, "pdf_page": page, "staff_on_page": line,
+            "mu2_rows": f"{min(rows)}-{max(rows)}" if rows else "",
+            "mu2_notes": " ".join(mu2_notes),
+            "pdf_notes": " ".join(_named(h["pitch"], 0) for h in heads),
+        })
 
 
 # --- splitting --------------------------------------------------------------
