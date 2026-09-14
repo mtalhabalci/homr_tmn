@@ -14,12 +14,20 @@ label changes by that one symbol. The notes that follow no longer fill the
 new measure exactly; the reader is being taught to read the digits, and the
 picture and its label still agree.
 
-    python -m training.datasets.meters --split train
+Other engravers' digits are not Mus2's: Üsküdar Musiki Cemiyeti's pages, set
+in a Finale-style font, had their 10/8 read as 16/8 in six works of nine. So
+the new digits can also come from the SMuFL fonts, whose time-signature
+digits every one of them carries.
+
+    python -m training.datasets.meters --split train --per-class 100 --digit-fonts mixed
     python -m training.datasets.meters --split test --per-class 10
+    python -m training.datasets.meters --split test --per-class 10 --suffix _fonts \
+        --digit-fonts Bravura,FinaleMaestro,Gootville,Leland,MScore,MuseJazz,FinaleBroadway
 """
 
 import argparse
 import collections
+import glob
 import os
 import random
 
@@ -51,6 +59,7 @@ from training.datasets.courtesy import (
     take_off,
     without_text,
 )
+from training.datasets.fonts import TRAIN_FONTS, font_buffer
 from training.datasets.page_notes import read_staff, uses_usual_encoding
 
 TARGETS = [f"{n}/{d}" for n in _time_numerators for d in _time_denominators]
@@ -102,9 +111,37 @@ def set_number(page: fitz.Page, text: str, centre: float, baseline: float, size:
         x += width
 
 
+# SMuFL's time-signature digits, 0 to 9.
+TIME_SIG_ZERO = 0xE080
+
+
+_parsed: dict[int, fitz.Font] = {}
+
+
+def set_smufl_number(page: fitz.Page, text: str, centre: float, baseline: float, size: float, face: bytes) -> None:
+    """A number in a SMuFL font's time-signature digits, which stand centred on their baseline.
+
+    The page must already carry the font as "timesig": a SMuFL font is most of
+    a megabyte, and embedding it for every number is what made this slow.
+    """
+    font = _parsed.get(id(face))
+    if font is None:
+        font = _parsed[id(face)] = fitz.Font(fontbuffer=face)
+    codes = [TIME_SIG_ZERO + int(c) for c in text]
+    widths = [font.glyph_advance(code) * size for code in codes]
+    x = centre - sum(widths) / 2
+    for code, width in zip(codes, widths):
+        page.insert_text(fitz.Point(x, baseline), chr(code), fontname="timesig", fontsize=size, color=(0, 0, 0))
+        x += width
+
+
 def new_first_staff(path: str, lines: list[float], page_number: int, digits: list[dict], meter: str,
-                    fonts: dict[str, bytes]) -> np.ndarray | None:
+                    fonts: dict[str, bytes], face: bytes | None = None) -> np.ndarray | None:
     """The first staff with its time signature replaced, or None if it will not fit cleanly.
+
+    The new digits are Mus2's, or with face a SMuFL font's, set as SMuFL sets
+    them: four staff spaces to the em, the upper number centred on the upper
+    half of the staff and the lower on the lower half.
 
     The old digits are taken off the rendered staff, not out of the pdf: see
     without_text for what removing characters from the pdf did to the notes.
@@ -135,8 +172,14 @@ def new_first_staff(path: str, lines: list[float], page_number: int, digits: lis
     sheet = blank.new_page(width=size[0], height=size[1])
     centre = (min(d["bbox"].x0 for d in digits) + max(d["bbox"].x1 for d in digits)) / 2
     numerator, denominator = meter.split("/")
-    set_number(sheet, numerator, centre, upper[0]["origin"][1], upper[0]["size"], fonts)
-    set_number(sheet, denominator, centre, lower[0]["origin"][1], lower[0]["size"], fonts)
+    if face is None:
+        set_number(sheet, numerator, centre, upper[0]["origin"][1], upper[0]["size"], fonts)
+        set_number(sheet, denominator, centre, lower[0]["origin"][1], lower[0]["size"], fonts)
+    else:
+        height = lines[-1] - lines[0]
+        sheet.insert_font(fontname="timesig", fontbuffer=face)
+        set_smufl_number(sheet, numerator, centre, lines[0] + height / 4, height, face)
+        set_smufl_number(sheet, denominator, centre, lines[0] + 3 * height / 4, height, face)
     alone = _pixels(sheet, clip, dpi)
     blank.close()
     ink = alone.min(axis=2) < INK
@@ -160,7 +203,31 @@ def main() -> None:
              "as the beat, or one beat to the measure. Defaults to --per-class.",
     )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--digit-fonts", default="Mus2",
+        help="Comma-separated fonts to set the new digits in, one chosen per staff: Mus2 and "
+             "any of the SMuFL fonts in fonts.FONT_URLS. 'mixed' is Mus2 for a third of the "
+             "staffs and the training fonts for the rest.",
+    )
+    parser.add_argument("--suffix", default="", help="Appended to the output folder and index name.")
+    parser.add_argument("--part", default=None, help="K/N: only every Nth time signature from the Kth, to run N at once.")
+    parser.add_argument("--merge", action="store_true", help="Join the index files the parts wrote.")
     options = parser.parse_args()
+    stem = os.path.join(out_root, f"index_{options.split}{options.suffix}")
+    if options.merge:
+        parts = sorted(glob.glob(stem + ".part*.txt"))
+        lines_out = [line for path in parts for line in open(path, encoding="utf-8") if line.strip()]
+        with open(stem + ".txt", "w", encoding="utf-8") as handle:
+            handle.writelines(lines_out)
+        for path in parts:
+            os.remove(path)
+        eprint(f"{len(lines_out)} staffs from {len(parts)} parts -> {stem}.txt")
+        return
+    targets, part = TARGETS, ""
+    if options.part:
+        k, n = (int(v) for v in options.part.split("/"))
+        targets, part = TARGETS[k::n], f".part{k}"
+        options.seed += 10 * k
 
     index = {"train": index_train, "val": index_val, "test": index_test}[options.split]
     works = staves_of(index)
@@ -168,7 +235,15 @@ def main() -> None:
     if len(fonts) < 10:
         eprint(f"Only found digits {sorted(fonts)}")
     rng = random.Random(options.seed)
-    folder = os.path.join(out_root, options.split)
+    # Its own generator, so that setting digits in Mus2 alone draws exactly
+    # the staffs it always has.
+    font_rng = random.Random(options.seed + 1)
+    if options.digit_fonts == "mixed":
+        choices = ["Mus2"] * (len(TRAIN_FONTS) // 2) + list(TRAIN_FONTS)
+    else:
+        choices = options.digit_fonts.split(",")
+    faces = {name: None if name == "Mus2" else font_buffer(name) for name in set(choices)}
+    folder = os.path.join(out_root, options.split + options.suffix)
     os.makedirs(folder, exist_ok=True)
 
     firsts = []
@@ -201,7 +276,7 @@ def main() -> None:
             return options.rare_per_class
         return options.per_class
 
-    for meter in TARGETS:
+    for meter in targets:
         for attempt in range(wanted(meter) * 4):
             if made[meter] >= wanted(meter):
                 break
@@ -210,10 +285,12 @@ def main() -> None:
             label = f"timeSignature_{meter}"
             if not any(r[0].startswith("timeSignature") for r in rows) or any(r[0] == label for r in rows):
                 continue
-            image = new_first_staff(path, lines, page_number, digits, meter, fonts)
+            face = font_rng.choice(choices) if len(choices) > 1 else choices[0]
+            image = new_first_staff(path, lines, page_number, digits, meter, fonts, faces[face])
             if image is None:
                 continue
-            base = os.path.join(folder, f"{work}-00-m{meter.replace('/', '_')}-{attempt}")
+            named = "" if face == "Mus2" else f"-f{face}"
+            base = os.path.join(folder, f"{work}-00-m{meter.replace('/', '_')}-{attempt}{named}")
             with open(base + ".tokens", "w", encoding="utf-8") as handle:
                 for row in rows:
                     handle.write(" ".join([label, *row[1:]] if row[0].startswith("timeSignature") else row) + "\n")
@@ -222,10 +299,10 @@ def main() -> None:
             made[meter] += 1
             rel = lambda p: os.path.relpath(p, git_root).replace(os.sep, "/")  # noqa: E731
             lines_out.append(f"{rel(base + '.png')},{rel(base + '.tokens')}\n")
-    with open(os.path.join(out_root, f"index_{options.split}.txt"), "w", encoding="utf-8") as handle:
+    with open(stem + part + ".txt", "w", encoding="utf-8") as handle:
         handle.writelines(lines_out)
-    short = [meter for meter in TARGETS if made[meter] < wanted(meter)]
-    eprint(f"{len(lines_out)} staffs across {len(TARGETS)} time signatures; short of target: {short}")
+    short = [meter for meter in targets if made[meter] < wanted(meter)]
+    eprint(f"{len(lines_out)} staffs across {len(targets)} time signatures; short of target: {short}")
 
 
 if __name__ == "__main__":
