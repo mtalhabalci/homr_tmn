@@ -165,6 +165,9 @@ def main() -> None:  # noqa: PLR0915
     parser.add_argument("--out", required=True)
     parser.add_argument("--match", action="append", default=[],
                         help="pdf-stem=mu2-path, to compare a reading with the same piece in SymbTr.")
+    parser.add_argument("--tokens", action="store_true",
+                        help="Also write what was read from each staff as a .tokens file beside its picture, "
+                             "in the training data's format, to build labels on.")
     options = parser.parse_args()
     matches = dict(item.split("=", 1) for item in options.match)
 
@@ -201,6 +204,11 @@ def main() -> None:  # noqa: PLR0915
                 png = f"p{staff['page']}-s{staff['staff']:02d}.png"
                 with open(os.path.join(folder, png), "wb") as handle:
                     handle.write(cv2.imencode(".png", staff["cut"])[1].tobytes())
+                if options.tokens:
+                    with open(os.path.join(folder, png[:-4] + ".tokens"), "w", encoding="utf-8") as handle:
+                        handle.writelines(
+                            f"{s.rhythm} {s.pitch} {s.lift} {s.articulation} {s.position}\n" for s in staff["symbols"]
+                        )
                 record.append({"page": staff["page"], "staff": staff["staff"], "image": f"{stem}/{png}",
                                "read": text_of(staff["symbols"])})
             result = {"staffs": len(staffs), "symbols": sum(len(s["symbols"]) for s in staffs)}
