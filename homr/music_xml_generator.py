@@ -385,6 +385,11 @@ def build_makam_key(
     write <key-alter> alongside: it is what carries the pitch, and a reader that
     does not know the microtonal glyph names still transposes correctly.
     """
+    # A signature sign read without a staff degree names no note to alter;
+    # it is left out rather than written as a key MusicXML cannot hold.
+    accidentals = [s for s in accidentals if s.pitch and s.pitch[0] in "ABCDEFG"]
+    if not accidentals:
+        return
     key = mxl.XMLKey()
     attributes.add_child(key)
     for symbol in accidentals:

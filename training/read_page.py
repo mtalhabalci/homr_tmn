@@ -185,11 +185,15 @@ def main() -> None:  # noqa: PLR0915
             voice: list[EncodedSymbol] = []
             for staff in staffs:
                 voice += staff["symbols"] + [EncodedSymbol("newline")]
-            xml = generate_xml(XmlGeneratorArguments(), [voice], stem)
-            xml_path = os.path.join(scratch, "out.musicxml")
-            xml.write(xml_path)
-            with open(xml_path, "rb") as source, open(os.path.join(options.out, stem + ".musicxml"), "wb") as target:
-                target.write(source.read())
+            # One malformed symbol must not cost the other scores their reading.
+            try:
+                xml = generate_xml(XmlGeneratorArguments(), [voice], stem)
+                xml_path = os.path.join(scratch, "out.musicxml")
+                xml.write(xml_path)
+                with open(xml_path, "rb") as source, open(os.path.join(options.out, stem + ".musicxml"), "wb") as target:
+                    target.write(source.read())
+            except Exception as error:  # noqa: BLE001
+                eprint(f"  no MusicXML for {stem}: {error}")
             folder = os.path.join(options.out, stem)
             os.makedirs(folder, exist_ok=True)
             record = []
