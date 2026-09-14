@@ -375,6 +375,14 @@ def distort_image(image: NDArray, allow_occlusions: bool = False) -> NDArray:
     if allow_occlusions:
         transforms_list.extend(
             [
+                # Old stencilled scans and photographs taken from afar give a
+                # staff a few pixels to the space, enlarged back by the reader.
+                # Training only, like the occlusions: the tests stay as they were.
+                A.Downscale(
+                    scale_range=(0.25, 0.6),
+                    interpolation_pair={"downscale": cv2.INTER_AREA, "upscale": cv2.INTER_LINEAR},
+                    p=0.15,
+                ),
                 A.RandomShadow(
                     shadow_roi=(0, 0, 1, 1),
                     num_shadows_limit=(1, 3),
