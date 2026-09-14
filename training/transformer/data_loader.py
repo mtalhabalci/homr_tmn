@@ -92,6 +92,8 @@ class DataLoader:
             "positions": tokens.positions,
             "articulations": tokens.articulations,
             "mask": tokens.mask,
+            # Not a label of its own: which of the labels above the loss must skip.
+            "unverified": tokens.unverified,
         }
         return result
 

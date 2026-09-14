@@ -368,6 +368,17 @@ class ScoreDecoder(nn.Module):
         positionsi = positions[:, :-1]
         positionso = positions[:, 1:]
 
+        # Fields read from a real scan that nothing confirmed are fed to the
+        # decoder as read, but no loss is taken on them (training_vocabulary.UNVERIFIED).
+        unverified = kwargs.pop("unverified", None)
+        if unverified is not None and unverified.any():
+            skip = unverified[:, 1:, :]
+            rhythmso = rhythmso.masked_fill(skip[..., 0], self.ignore_index)
+            pitchso = pitchso.masked_fill(skip[..., 1], self.ignore_index)
+            liftso = liftso.masked_fill(skip[..., 2], self.ignore_index)
+            articulationso = articulationso.masked_fill(skip[..., 3], self.ignore_index)
+            positionso = positionso.masked_fill(skip[..., 4], self.ignore_index)
+
         if mask.shape[1] == rhythms.shape[1]:
             mask = mask[:, :-1]
 

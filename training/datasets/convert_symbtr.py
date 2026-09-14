@@ -1251,7 +1251,9 @@ def _lift_counts(line: str, by_context: bool = False) -> collections.Counter:
     counts: collections.Counter = collections.Counter()
     for token_line in token_path.read_text(encoding="utf-8").splitlines():
         parts = token_line.split()
-        if len(parts) == 5 and parts[2] not in (".", "_"):
+        # A sign marked unverified (a real scan's, see training_vocabulary.UNVERIFIED)
+        # is not trained on, so it must not count towards a class's examples either.
+        if len(parts) == 5 and parts[2] not in (".", "_") and not parts[2].startswith("?"):
             if by_context:
                 place = "signature" if parts[0] == key_accidental else "notes"
                 counts[(parts[2], place)] += 1
@@ -1314,8 +1316,9 @@ def _lifts_in(line: str) -> set[str]:
     token_path = git_root / line.strip().split(",")[1]
     if not token_path.exists():
         return set()
-    content = token_path.read_text(encoding="utf-8")
-    return {lift for lift in RARE_LIFTS if lift in content}
+    lifts = {parts[2] for token_line in token_path.read_text(encoding="utf-8").splitlines()
+             if len(parts := token_line.split()) == 5}
+    return {lift for lift in RARE_LIFTS if lift in lifts}
 
 
 def split_and_balance(lines: list[str], seed: int = 0) -> dict[str, list[str]]:
@@ -1376,7 +1379,7 @@ def _lift_histogram(lines: list[str]) -> collections.Counter:
             continue
         for token_line in token_path.read_text(encoding="utf-8").splitlines():
             parts = token_line.split()
-            if len(parts) == 5 and parts[2] not in (".", "_", "N"):
+            if len(parts) == 5 and parts[2] not in (".", "_", "N") and not parts[2].startswith("?"):
                 counts[parts[2]] += 1
     return counts
 

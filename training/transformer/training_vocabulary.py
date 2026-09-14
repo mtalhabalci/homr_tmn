@@ -83,6 +83,12 @@ def token_lines_to_str(symbols: list[EncodedSymbol]) -> str:
     return str.join("\n", chord_strings)
 
 
+# A field written with this in front is what the model read but nothing
+# confirmed: it stays in the sequence the decoder is fed, and the loss skips it.
+UNVERIFIED = "?"
+BRANCH_ORDER = ("rhythm", "pitch", "lift", "articulation", "position")
+
+
 def read_token_lines(lines: list[str]) -> list[EncodedSymbol]:
     result = []
     for line in lines:
@@ -91,12 +97,13 @@ def read_token_lines(lines: list[str]) -> list[EncodedSymbol]:
             if "tieSlur" in entry:
                 continue
             parts = entry.strip().split()
-            if len(parts) == 5:
-                rhythm, pitch, lift, articulation, position = parts
-            else:
-                rhythm, pitch, lift, articulation = parts
-                position = "upper"
+            if len(parts) == 4:
+                parts.append("upper")
+            unverified = {branch for branch, part in zip(BRANCH_ORDER, parts) if part.startswith(UNVERIFIED)}
+            rhythm, pitch, lift, articulation, position = (part.lstrip(UNVERIFIED) for part in parts)
             symbol = EncodedSymbol(rhythm, pitch, lift, articulation, position)
+            if unverified:
+                symbol.unverified = unverified  # type: ignore[attr-defined]
             is_first = i == 0
             if not is_first:
                 result.append(EncodedSymbol("chord"))
@@ -121,6 +128,7 @@ class DecoderBranches:
         articulations: torch.Tensor,
         positions: torch.Tensor,
         mask: torch.Tensor,
+        unverified: torch.Tensor | None = None,
     ) -> None:
         self.rhythms = rhythms
         self.pitchs = pitchs
@@ -128,6 +136,8 @@ class DecoderBranches:
         self.articulations = articulations
         self.positions = positions
         self.mask = mask
+        # Per position and branch (BRANCH_ORDER): True where the loss must not look.
+        self.unverified = unverified
 
 
 def to_decoder_branches(symbols: list[EncodedSymbol]) -> DecoderBranches:
@@ -140,6 +150,7 @@ def to_decoder_branches(symbols: list[EncodedSymbol]) -> DecoderBranches:
     articulations = [nonote_token]
     position = [nonote_token]
     mask = [True]
+    unverified = [[False] * len(BRANCH_ORDER)]
     for symbol in symbols:
         rhythms.append(vocab.rhythm[symbol.rhythm])
         pitchs.append(vocab.pitch[symbol.pitch])
@@ -147,6 +158,8 @@ def to_decoder_branches(symbols: list[EncodedSymbol]) -> DecoderBranches:
         articulations.append(vocab.articulation[symbol.articulation])
         position.append(vocab.position[symbol.position])
         mask.append(True)
+        doubtful = getattr(symbol, "unverified", ())
+        unverified.append([branch in doubtful for branch in BRANCH_ORDER])
 
     rhythms.append(end_of_seq)
     pitchs.append(nonote_token)
@@ -162,6 +175,7 @@ def to_decoder_branches(symbols: list[EncodedSymbol]) -> DecoderBranches:
         articulations.append(nonote_token)
         position.append(nonote_token)
         mask.append(False)
+    unverified += [[False] * len(BRANCH_ORDER)] * (len(rhythms) - len(unverified))
 
     return DecoderBranches(
         rhythms=torch.tensor(rhythms),
@@ -170,6 +184,7 @@ def to_decoder_branches(symbols: list[EncodedSymbol]) -> DecoderBranches:
         pitchs=torch.tensor(pitchs),
         positions=torch.tensor(position),
         mask=torch.tensor(mask),
+        unverified=torch.tensor(unverified, dtype=torch.bool),
     )
 
 
