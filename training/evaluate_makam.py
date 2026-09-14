@@ -38,6 +38,7 @@ per note and per staff.
 
 import argparse
 import collections
+import json
 import os
 import sys
 
@@ -459,9 +460,15 @@ def _symbols_from_batch(
 
 
 def evaluate_generated(
-    checkpoint: str | None, limit: int | None, index: str | None = None, clean: bool = False
+    checkpoint: str | None, limit: int | None, index: str | None = None, clean: bool = False,
+    dump: str | None = None,
 ) -> None:
-    """Score the model reading each staff on its own, with nothing fed back."""
+    """Score the model reading each staff on its own, with nothing fed back.
+
+    With dump, every staff's misreads -- what was there and what was read, the
+    not-applicable marker aside -- are written to that json file, so that two
+    models can be set against each other staff by staff.
+    """
     config = Config()
     if checkpoint:
         config.filepaths.checkpoint = checkpoint
@@ -503,6 +510,7 @@ def evaluate_generated(
     meter_hit: collections.Counter = collections.Counter()
     clean_staffs = 0
     staffs = 0
+    record: list[dict] = []
 
     with torch.no_grad():
         for batch in loader:
@@ -519,17 +527,20 @@ def evaluate_generated(
             staffs += 1
             mistakes = 0
             misreads = 0
+            wrong: list[list] = []
             for actual, predicted in pairs:
                 if actual is None:
                     insertions += 1
                     mistakes += 1
                     misreads += 1
+                    wrong.append([None, list(predicted)])
                     continue
                 total += 1
                 if predicted is None:
                     deletions += 1
                     mistakes += 1
                     misreads += 1
+                    wrong.append([list(actual), None])
                 elif actual != predicted:
                     substitutions += 1
                     mistakes += 1
@@ -539,6 +550,7 @@ def evaluate_generated(
                     # downstream reads those columns.
                     if has_rhythm_symbol_a_position(actual[0]) or actual[0] != predicted[0]:
                         misreads += 1
+                        wrong.append([list(actual), list(predicted)])
                     else:
                         usable_ok += 1
                 else:
@@ -560,7 +572,11 @@ def evaluate_generated(
             if not mistakes:
                 clean_staffs += 1
             staff_misreads.append(misreads)
+            record.append({"line": samples[staffs - 1].strip(), "misreads": wrong})
 
+    if dump:
+        with open(dump, "w", encoding="utf-8") as handle:
+            json.dump(record, handle, ensure_ascii=False)
     if not total:
         eprint("Nothing to score")
         return
@@ -645,9 +661,13 @@ if __name__ == "__main__":
         help="Read the images as they are, without the roughening that stands in "
              "for a photograph. For staffs that were cut from a photograph already.",
     )
+    parser.add_argument(
+        "--dump", default=None,
+        help="With --generate: write every staff's misreads to this json file.",
+    )
     options = parser.parse_args()
     if options.generate:
-        evaluate_generated(options.checkpoint, options.limit, options.index, options.clean)
+        evaluate_generated(options.checkpoint, options.limit, options.index, options.clean, options.dump)
     else:
         evaluate(
             options.checkpoint,
