@@ -74,7 +74,12 @@ def read_pages(path: str, model: torch.nn.Module, scratch: str) -> list[dict]:
             regions = StaffRegions(multi_staffs)
             found = sorted((s for multi in multi_staffs for s in multi.staffs), key=lambda s: s.min_y)
             for number, staff in enumerate(found):
-                cut, _ = prepare_staff_image(debug, number, staff, preprocessed, regions)
+                try:
+                    cut, _ = prepare_staff_image(debug, number, staff, preprocessed, regions)
+                except cv2.error as error:
+                    # A staff found at the very edge of a scan can cut to nothing.
+                    eprint(f"  page {page.number + 1}, staff {number + 1}: could not be cut ({str(error)[:60]})")
+                    continue
                 gray = cut if cut.ndim == 2 else cv2.cvtColor(cut, cv2.COLOR_BGR2GRAY)
                 tensor = pad_to_3_dims(ndarray_to_tensor(gray)).to(device)
                 with torch.no_grad():
