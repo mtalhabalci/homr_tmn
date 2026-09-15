@@ -165,11 +165,18 @@ def main() -> None:  # noqa: PLR0915
     parser.add_argument("--out", required=True)
     parser.add_argument("--match", action="append", default=[],
                         help="pdf-stem=mu2-path, to compare a reading with the same piece in SymbTr.")
+    parser.add_argument("--mu2-dir", default=None,
+                        help="A folder of .mu2 files: each pdf named after a SymbTr work is set against its own.")
     parser.add_argument("--tokens", action="store_true",
                         help="Also write what was read from each staff as a .tokens file beside its picture, "
                              "in the training data's format, to build labels on.")
     options = parser.parse_args()
     matches = dict(item.split("=", 1) for item in options.match)
+    if options.mu2_dir:
+        for name in os.listdir(options.folder):
+            reference = os.path.join(options.mu2_dir, name[:-4] + ".mu2")
+            if name.lower().endswith(".pdf") and os.path.exists(reference):
+                matches.setdefault(name[:-4], reference)
 
     homr_main.detect_title = _no_title
     config = Config()
