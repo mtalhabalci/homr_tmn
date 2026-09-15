@@ -304,7 +304,12 @@ def train_transformer(
         weight_decay=0.05,
         warmup_ratio=0.1,
         lr_scheduler_type="cosine",
-        load_best_model_at_end=True,
+        # A fine-tune keeps its last epoch, where the cosine schedule has come to
+        # rest. The validation staffs are nearly all notes: once those settle, the
+        # "best" epoch is noise in the fourth digit, and in v11 it picked epoch 6
+        # of 15, before the rare two-digit usuls were learned (usul exam 685/840
+        # against 839/840 at the end).
+        load_best_model_at_end=not fine_tune,
         metric_for_best_model="eval_accuracy",
         greater_is_better=True,
         report_to=["tensorboard"],
@@ -367,8 +372,10 @@ def train_transformer(
         return
 
     try:
-        callbacks: list[TrainerCallback] = [EarlyStoppingCallback(early_stopping_patience=5)]
+        callbacks: list[TrainerCallback] = []
         if not fine_tune:
+            # Stopping early needs the best model loaded at the end; see above.
+            callbacks.append(EarlyStoppingCallback(early_stopping_patience=5))
             callbacks.append(FreezeCallback(epochs_to_freeze=2))
 
         trainer = HomrTrainer(
