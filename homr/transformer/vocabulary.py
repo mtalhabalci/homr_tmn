@@ -102,6 +102,14 @@ def build_rhythm() -> dict[str, int]:
     rhythm.extend(
         f"timeSignature_{n}/{d}" for n in _time_numerators for d in _time_denominators
     )
+    # Marks a Turkish score draws and the Western set above leaves out: the segno a piece
+    # returns to, the coda it jumps to, the two instructions that send it there, and the
+    # dashed stroke that divides one long usul into measures a reader can follow. Appended
+    # after the makam tokens for the same reason: the indices above must not move.
+    rhythm.extend(["segno", "coda", "daCapo", "daSegno", "dashedbarline"])
+    # Evsat is counted in 26, a number the list above skips. Appended here rather than put in
+    # its place among the others so that the indices of the tokens already trained do not move.
+    rhythm.extend(f"timeSignature_26/{d}" for d in _time_denominators)
 
     # Dynamics
     # rhythm.extend(

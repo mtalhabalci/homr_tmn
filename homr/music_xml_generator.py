@@ -267,6 +267,8 @@ def build_measures(
             elif measures:
                 barline = build_or_get_barline(measures[-1], "right")
                 build_barline_ending(symbol, barline, volta_number)
+        elif rhythm in ("segno", "coda", "daCapo", "daSegno"):
+            build_direction(symbol, current_measure)
         else:
             eprint("Symbol isn't supported yet ", symbol)
 
@@ -518,7 +520,24 @@ def build_time_signature(
     state.beats = beats
 
 
+def build_direction(symbol: EncodedSymbol, measure: mxl.XMLMeasure) -> None:
+    """A segno or coda sign, or the instruction that sends the player to one."""
+    direction = mxl.XMLDirection()
+    direction_type = mxl.XMLDirectionType()
+    if symbol.rhythm == "segno":
+        direction_type.add_child(mxl.XMLSegno())
+    elif symbol.rhythm == "coda":
+        direction_type.add_child(mxl.XMLCoda())
+    else:
+        direction_type.add_child(mxl.XMLWords(value_="D.C." if symbol.rhythm == "daCapo" else "D.S."))
+    direction.add_child(direction_type)
+    measure.add_child(direction)
+
+
 def build_barline_style(barline: EncodedSymbol, xml: mxl.XMLBarline) -> None:
+    if barline.rhythm == "dashedbarline":
+        xml.add_child(mxl.XMLBarStyle(value_="dashed"))
+        return
     style_value = "heavy-heavy" if barline.rhythm == "bolddoublebarline" else "light-light"
     style = mxl.XMLBarStyle(value_=style_value)
     xml.add_child(style)
