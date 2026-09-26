@@ -116,6 +116,10 @@ def evaluate(
     truth: dict[str, collections.Counter] = {b: collections.Counter() for b in BRANCHES}
     guessed: dict[str, collections.Counter] = {b: collections.Counter() for b in BRANCHES}
     confusion: collections.Counter = collections.Counter()
+    # One wrong structure mark loses a whole section of the piece, so it matters
+    # which way the mistake goes: a double bar read as a plain bar can be put back
+    # by a rule about where a piece ends, while a double bar read as a note cannot.
+    line_confusion: collections.Counter = collections.Counter()
     # An accidental is the same shape wherever it sits, but the model only ever
     # meets some of them on one degree of the staff: 752 of the 758 five-comma
     # sharps in training are on F5. Splitting recall by the note underneath says
@@ -198,6 +202,8 @@ def evaluate(
                         hits[branch][actual] += 1
                     elif branch == "lift":
                         confusion[(actual, predicted)] += 1
+                    elif branch == "rhythm":
+                        line_confusion[(actual, predicted)] += 1
 
             lift_preds, lift_labels_all = step["lift"]
             pitch_preds_all, pitch_labels_all = step["pitch"]
@@ -272,6 +278,33 @@ def evaluate(
                 f"   {lift_names.get(actual, actual):<12} read as "
                 f"{lift_names.get(predicted, predicted):<12} {count:>6}"
             )
+
+    rhythm_names = names["rhythm"]
+    structure = {
+        index for index, token in rhythm_names.items()
+        if token.endswith("barline") or token.startswith(("repeat", "volta"))
+        or token in ("segno", "coda", "fine")
+    }
+    involved = {
+        pair: count for pair, count in line_confusion.items()
+        if pair[0] in structure or pair[1] in structure
+    }
+    if involved:
+        eprint("\n=== structure marks: what is mistaken for what ===")
+        for (actual, predicted), count in sorted(involved.items(), key=lambda kv: -kv[1])[:20]:
+            eprint(
+                f"   {rhythm_names.get(actual, actual):<20} read as "
+                f"{rhythm_names.get(predicted, predicted):<20} {count:>6}"
+            )
+        drawn = sum(seen for index, seen in truth["rhythm"].items() if index in structure)
+        lost = sum(c for (a, p), c in involved.items() if a in structure and p not in structure)
+        swapped = sum(c for (a, p), c in involved.items() if a in structure and p in structure)
+        made_up = sum(c for (a, p), c in involved.items() if a not in structure and p in structure)
+        eprint("\n=== structure marks as a group ===")
+        eprint(f"   drawn on the page       : {drawn}")
+        eprint(f"   read as the wrong mark  : {swapped}   (a rule could still put these back)")
+        eprint(f"   lost to a note or blank : {lost}")
+        eprint(f"   invented out of nothing : {made_up}")
 
     # Symbols dropped or invented, the measure that matters most here.
     empty_index = config.lift_vocab.get("_")
