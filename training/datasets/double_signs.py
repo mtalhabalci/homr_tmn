@@ -2,8 +2,8 @@
 
 The makam corpus never draws these two signs, but the vocabulary has them ("##", "bb", kept from homr's
 Western training), and Turkish scores do use them now and then. A printed staff is rendered with its signs
-redrawn in Bravura (see fonts.py), and one ordinary sharp or ordinary flat in front of a note is drawn as
-the double sign instead (SMuFL U+E263 / U+E264). The label of that note gets the lift "##" or "bb"; its
+redrawn in a SMuFL font (see fonts.py), and one ordinary sharp or ordinary flat in front of a note is drawn
+as the double sign instead (SMuFL U+E263 / U+E264). The label of that note gets the lift "##" or "bb"; its
 pitch stays, since only the sign changes.
 
 A note's row in the label is found by order: the n-th notehead on the page is the n-th note row. Staffs
@@ -25,8 +25,16 @@ FinaleBroadway lack the 1-comma flat most makam key signatures carry; with the s
 version had, a flat whose turn fell to one of them was mostly left out (171 double flats, not 280). Now
 those three get about 20 double flats each and the other four about 55.
 
-The exam stays the first version's test split, datasets/double-signs/index_test.txt (39 staffs, Bravura
-alone, from the test works); this version writes to double-signs-v2 and leaves it alone.
+The labels are the copies segno_labels.py made with the segnos put back (datasets/SymbTr-segno); a staff
+with no segno keeps its own label there. The first version took the old labels, and 40 of its 295 staffs
+showed a segno the label said was not there -- the very thing v15 was trained out of. A staff whose page
+shows a different number of segnos over it than its label holds is left out; of the 2,854 staffs that
+offer a sign, none does, and 69 of the 560 drawn carry a segno.
+
+The exam stays the first version's 39 staffs (Bravura alone, from the test works). Its labels had the same
+fault: v15 read three segnos there and was charged for inventing them. --split test copies those 39
+pictures byte for byte to double-signs-v2/test and gives each the segno label of its staff with the same
+"##" or "bb" row; datasets/double-signs is left as it was.
 
 v14 read 38 of 39 such signs as the 4-comma flat and none as a double sign, and v15, trained on the first
 version's staffs, still none (the double sharp became sharp1): the fine-tune's start had pushed "##" and
@@ -34,25 +42,32 @@ version's staffs, still none (the double sharp became sharp1): the fine-tune's s
 they are no longer retired.
 
     python -m training.datasets.double_signs --split train
+    python -m training.datasets.double_signs --split test
 """
 
 import argparse
 import collections
 import os
 import random
+import re
+import shutil
 
 import fitz
 import numpy as np
 
 from homr.simple_logging import eprint
 from training.datasets import fonts
-from training.datasets.convert_symbtr import _staff_lines, dataset_root, git_root, index_test, index_train, symbtr_pdf
-from training.datasets.courtesy import read_rows, staves_of
+from training.datasets.convert_symbtr import _staff_lines, dataset_root, git_root, index_test, symbtr_pdf
+from training.datasets.courtesy import MARGIN, read_rows, staves_of
 from training.datasets.page_notes import read_staff, uses_usual_encoding
+from training.datasets.segno_labels import OUT as SEGNO_ROOT
+from training.datasets.segno_labels import SEGNO
 
 out_root = os.path.join(dataset_root, "double-signs-v2")
+# The labels with the segnos segno_labels.py gave back; a staff without one keeps its own label there.
+segno_index = {split: os.path.join(SEGNO_ROOT, f"index_{split}.txt") for split in ("train", "test")}
+first_exam = os.path.join(dataset_root, "double-signs", "index_test.txt")
 DOUBLE = {"flat5": ("bb", 0xE264), "sharp4": ("##", 0xE263)}
-FONT = "Bravura"
 
 
 def candidates(page: fitz.Page, lines: list[float], rows: list[list[str]]) -> dict[str, tuple[int, dict]]:
@@ -70,6 +85,25 @@ def candidates(page: fitz.Page, lines: list[float], rows: list[list[str]]) -> di
         if head["sign"] is not None and lift in DOUBLE and rows[row][2] == lift and lift not in found:
             found[lift] = (row, head["sign"])
     return found
+
+
+def segnos_on(page: fitz.Page, staves: list[tuple[int, list[float]]], number: int) -> int:
+    """How many segnos Mus2 set over staff `number`, each given to a staff the way segno_labels gives it."""
+    numbered = [(n, lines) for n, (p, lines) in enumerate(staves) if p == page.number]
+    count = 0
+    for block in page.get_text("rawdict")["blocks"]:
+        for line in block.get("lines", []):
+            for span in line["spans"]:
+                if "Mus2" not in span.get("font", ""):
+                    continue
+                for char in span.get("chars", []):
+                    if ord(char["c"]) != SEGNO:
+                        continue
+                    origin = char["origin"][1]
+                    gap, nearest = min((max(lines[0] - origin, origin - lines[-1], 0.0), n)
+                                       for n, lines in numbered)
+                    count += gap <= MARGIN and nearest == number
+    return count
 
 
 def redraw_one(path: str, page_number: int, lines: list[float], font: str, target: dict, name: str,
@@ -107,21 +141,19 @@ def redraw_one(path: str, page_number: int, lines: list[float], font: str, targe
     return image, why
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--split", choices=("train", "test"), default="train")
-    parser.add_argument("--limit", type=int, default=None, help="Works to look through.")
-    parser.add_argument("--most", type=int, default=280, help="Staffs for each double sign at most.")
-    parser.add_argument("--seed", type=int, default=0)
-    options = parser.parse_args()
-    folder = os.path.join(out_root, options.split)
+def rel(path: str) -> str:
+    return os.path.relpath(path, git_root).replace(os.sep, "/")
+
+
+def train(options: argparse.Namespace) -> None:
+    folder = os.path.join(out_root, "train")
     os.makedirs(folder, exist_ok=True)
-    works = staves_of(index_test if options.split == "test" else index_train)
-    turn = (FONT,) if options.split == "test" else fonts.TRAIN_FONTS
+    works = staves_of(segno_index["train"])
+    turn = fonts.TRAIN_FONTS
     faces = {name: fitz.Font(fontbuffer=fonts.font_buffer(name)) for name in turn}
-    rel = lambda p: os.path.relpath(p, git_root).replace(os.sep, "/")  # noqa: E731
 
     offered = []
+    unlabelled: collections.Counter = collections.Counter()
     for work in sorted(works)[: options.limit]:
         path = os.path.join(symbtr_pdf, work + ".pdf")
         with fitz.open(path) as document:
@@ -134,11 +166,19 @@ def main() -> None:
                 page, lines = document[staves[number][0]], staves[number][1]
                 rows = [list(r) for r in read_rows(os.path.join(git_root, tokens))]
                 found = candidates(page, lines, rows)
-                if found:
-                    lifts = {s["lift"] for s in fonts.signs_of(page, lines)}
-                    offered.append((work, number, staves[number], rows, found, lifts))
+                if not found:
+                    continue
+                # A segno the page shows and the label lacks would teach the model to look past it again.
+                shown, labelled = segnos_on(page, staves, number), sum(r[0] == "segno" for r in rows)
+                if shown != labelled:
+                    unlabelled[f"page {shown} segno, label {labelled}"] += 1
+                    continue
+                lifts = {s["lift"] for s in fonts.signs_of(page, lines)}
+                offered.append((work, number, staves[number], rows, found, lifts))
     eprint(f"{len(offered)} staffs offer a sign: "
-           + ", ".join(f"{DOUBLE[lift][0]} {sum(lift in o[4] for o in offered)}" for lift in DOUBLE))
+           + ", ".join(f"{DOUBLE[lift][0]} {sum(lift in o[4] for o in offered)}" for lift in DOUBLE)
+           + "; left out, the segnos of page and label differ: "
+           + (", ".join(f"{why} {n}" for why, n in unlabelled.most_common()) or "none"))
     random.Random(options.seed).shuffle(offered)
 
     made: list[str] = []
@@ -171,8 +211,7 @@ def main() -> None:
         image, row, name, font = drawn
         labelled = [list(r) for r in rows]
         labelled[row][2] = name
-        tag = "" if options.split == "test" else f"-f{font}"
-        base = os.path.join(folder, f"{work}-{number:02d}-{name.replace('#', 'x')}{tag}")
+        base = os.path.join(folder, f"{work}-{number:02d}-{name.replace('#', 'x')}-f{font}")
         with open(base + ".tokens", "w", encoding="utf-8") as handle:
             handle.writelines(" ".join(r) + "\n" for r in labelled)
         pixmap = fitz.Pixmap(fitz.csRGB, image.shape[1], image.shape[0],
@@ -183,7 +222,7 @@ def main() -> None:
         by_font[(name, font)] += 1
         if all(count[name] >= options.most for name, _ in DOUBLE.values()):
             break
-    index = os.path.join(out_root, f"index_{options.split}.txt")
+    index = os.path.join(out_root, "index_train.txt")
     with open(index, "w", encoding="utf-8") as handle:
         handle.writelines(sorted(made))
     eprint(f"{len(made)} staffs with one double sign -> {index}: "
@@ -191,6 +230,66 @@ def main() -> None:
     for name, _ in DOUBLE.values():
         eprint(f"  {name} by font: " + ", ".join(f"{f} {by_font[(name, f)]}" for f in turn))
     eprint("Left out: " + ", ".join(f"{why} {n}" for why, n in refused.most_common()))
+
+
+def exam() -> None:
+    """The first version's exam again, the same pictures byte for byte, its labels given their segnos."""
+    folder = os.path.join(out_root, "test")
+    os.makedirs(folder, exist_ok=True)
+    corrected, original = staves_of(segno_index["test"]), staves_of(index_test)
+    made: list[str] = []
+    gained = 0
+    for line in open(first_exam, encoding="utf-8"):
+        if not line.strip():
+            continue
+        image, tokens = line.strip().split(",")
+        stem = os.path.basename(tokens)[: -len(".tokens")]
+        work, number = re.fullmatch(r"(.*)-(\d\d)-(?:xx|bb)", stem).groups()
+        number = int(number)
+        old = read_rows(os.path.join(git_root, tokens))
+        source = read_rows(os.path.join(git_root, next(t for n, _, t in original[work] if n == number)))
+        segno_label = next(t for n, _, t in corrected[work] if n == number)
+        rows = [list(r) for r in read_rows(os.path.join(git_root, segno_label))]
+        # The one row the first version changed: the n-th note, its lift made "##" or "bb".
+        changed = [i for i, (a, b) in enumerate(zip(old, source)) if a != b]
+        if len(old) != len(source) or len(changed) != 1 or old[changed[0]][2] not in ("##", "bb"):
+            raise ValueError(f"{tokens}: not one lift changed from {len(source)} source rows")
+        nth = sum(1 for r in old[: changed[0]] if r[0].startswith("note"))
+        row = [i for i, r in enumerate(rows) if r[0].startswith("note")][nth]
+        if rows[row] != source[changed[0]]:
+            raise ValueError(f"{tokens}: the segno label's note {nth} is not the note that was changed")
+        rows[row][2] = old[changed[0]][2]
+        if [r for r in rows if r[0] != "segno"] != old:
+            raise ValueError(f"{tokens}: the new label differs from the old by more than segnos")
+        with fitz.open(os.path.join(symbtr_pdf, work + ".pdf")) as document:
+            staves = [(page.number, lines) for page in document for lines in _staff_lines(page)]
+            shown = segnos_on(document[staves[number][0]], staves, number)
+        labelled = sum(r[0] == "segno" for r in rows)
+        if shown != labelled:
+            eprint(f"  {stem}: the page shows {shown} segno, the label has {labelled}")
+        gained += labelled > 0
+        base = os.path.join(folder, stem)
+        shutil.copyfile(os.path.join(git_root, image), base + ".png")
+        with open(base + ".tokens", "w", encoding="utf-8") as handle:
+            handle.writelines(" ".join(r) + "\n" for r in rows)
+        made.append(f"{rel(base + '.png')},{rel(base + '.tokens')}\n")
+    index = os.path.join(out_root, "index_test.txt")
+    with open(index, "w", encoding="utf-8") as handle:
+        handle.writelines(made)
+    eprint(f"{len(made)} exam staffs, {gained} of them given a segno -> {index}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--split", choices=("train", "test"), default="train")
+    parser.add_argument("--limit", type=int, default=None, help="Works to look through.")
+    parser.add_argument("--most", type=int, default=280, help="Staffs for each double sign at most.")
+    parser.add_argument("--seed", type=int, default=0)
+    options = parser.parse_args()
+    if options.split == "test":
+        exam()
+    else:
+        train(options)
 
 
 if __name__ == "__main__":
