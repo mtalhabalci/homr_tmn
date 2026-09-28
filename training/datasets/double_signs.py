@@ -12,8 +12,10 @@ where the two counts differ, or where the row's lift is not the sign that was re
 For training the fonts take turns staff by staff over the seven fonts training sees (fonts.TRAIN_FONTS); the
 test set is drawn in Bravura alone.
 
-v14 read 38 of 39 such signs as the 4-comma flat and none as a double sign: what homr knew of them was lost in
-the makam fine-tuning, which never showed one.
+v14 read 38 of 39 such signs as the 4-comma flat and none as a double sign, and v15, trained on these staffs,
+still none (the double sharp became sharp1): the fine-tune's start had pushed "##" and "bb" out of reach
+together with "#" and "b" (train.seed_makam_accidentals). homr's checkpoint reads them; they are no longer
+retired.
 
     python -m training.datasets.double_signs --split test --limit 60
     python -m training.datasets.double_signs --split train

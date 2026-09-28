@@ -104,9 +104,15 @@ def seed_makam_accidentals(model: TrOMR, config: Config) -> None:
     The glyphs are the same shape: an ordinary sharp is the 4-comma sharp, an
     ordinary flat the 5-comma one. Copying the old rows into the new ones hands
     the model that knowledge instead of making it rediscover it, leaving only
-    the comma distinctions to learn. The Western accidentals are then pushed out
-    of reach, since makam labels never use them and a tie would otherwise be
-    settled by whichever weights are better trained.
+    the comma distinctions to learn. The plain sharp and flat are then pushed out
+    of reach, since makam labels never use them and a tie with sharp4 or flat5
+    would otherwise be settled by whichever weights are better trained.
+
+    The double sharp and double flat stay: no makam token replaces them, Turkish
+    scores do print them, and homr's checkpoint already reads them. Retiring
+    them too (as v1 to v15 did) set their bias to -1e4 at the start of every run,
+    so no amount of double-sign data could teach them: v15, trained on 295 such
+    staffs, still read 0 of 39, calling the double sharp sharp1 instead.
     """
     vocab = config.lift_vocab
     net = model.decoder.net
@@ -119,7 +125,7 @@ def seed_makam_accidentals(model: TrOMR, config: Config) -> None:
             net.lift_emb.emb.weight[index] = net.lift_emb.emb.weight[origin]
             net.to_logits_lift.weight[index] = net.to_logits_lift.weight[origin]
             net.to_logits_lift.bias[index] = net.to_logits_lift.bias[origin]
-        unused = [vocab[t] for t in ("#", "##", "b", "bb") if t in vocab]
+        unused = [vocab[t] for t in ("#", "b") if t in vocab]
         for index in unused:
             net.to_logits_lift.bias[index] = -1e4
     eprint(f"Seeded {len(vocab) - 7} makam accidentals and retired {len(unused)} Western ones")
