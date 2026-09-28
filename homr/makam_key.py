@@ -30,7 +30,7 @@ from homr.transformer.vocabulary import (
     nonote,
 )
 
-MEASURE_ENDS = ("barline", "repeat", "volta", "bolddoublebarline")
+MEASURE_ENDS = ("barline", "repeat", "volta", "doublebarline", "bolddoublebarline")
 
 
 def commas_for_lift(lift: str) -> int | None:

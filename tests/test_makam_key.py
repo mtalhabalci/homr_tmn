@@ -71,6 +71,16 @@ class TestMakamKey(unittest.TestCase):
         resolved = resolve_sounding(symbols)
         self.assertEqual(resolved[3].sounding, "flat1")
 
+    def test_a_double_barline_ends_the_measure_too(self) -> None:
+        symbols = [
+            EncodedSymbol("keyAccidental", "B4", "flat1", "_", "upper"),
+            note("note_8", "B4", "N"),
+            EncodedSymbol("doublebarline", ".", ".", ".", "."),
+            note("note_8", "B4", "_"),
+        ]
+        resolved = resolve_sounding(symbols)
+        self.assertEqual(resolved[3].sounding, "flat1")
+
     def test_a_tie_carries_its_sign_over_the_barline(self) -> None:
         symbols = [
             EncodedSymbol("keyAccidental", "F5", "sharp4", "_", "upper"),
