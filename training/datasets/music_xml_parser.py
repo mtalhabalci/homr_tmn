@@ -468,8 +468,11 @@ def _collect_articulation(note: mxl.XMLNote, part: TokensPart, staff: int) -> st
         if isinstance(child, mxl.XMLArpeggiate):
             articulations.append("arpeggiate")
         if isinstance(child, mxl.XMLTied):
+            # A tie is its own mark, not a slur: a model taught that the two are one
+            # erases every tie of a makam page, where ties carry the long notes.
             tie_type = str(child.attributes.get("type", ""))
-            articulations.append("slur" + tie_type.capitalize())
+            if tie_type in ("start", "stop"):
+                articulations.append("tie" + tie_type.capitalize())
         if isinstance(child, mxl.XMLSlur):
             slur_type = str(child.attributes.get("type", ""))
             articulations.append("slur" + slur_type.capitalize())

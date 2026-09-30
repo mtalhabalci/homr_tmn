@@ -127,7 +127,6 @@ class HumdrumKernConverter:
         # Grandstaff definitions: https://link.springer.com/article/10.1007/s10032-023-00432-z#Tab1
         self.ignore_beams = ("L", "J", "K", "k")
         self.ignore_alteration_displays = ("x", "X", "i", "I", "j", "Z", "y", "Y")
-        self.ignore_tie_continue = "_"
         # According to the grandstaff paper angleBracketOpen & Close stands for tieStart and tieEnd
         # but there is no tie visible
         self.angled_brackets = ("<", ">")
@@ -142,16 +141,19 @@ class HumdrumKernConverter:
             suffix = suffix.replace(symbol, "")
         for symbol in self.angled_brackets:
             suffix = suffix.replace(symbol, "")
-        suffix = suffix.replace(self.ignore_tie_continue, "")
 
         if not suffix:
             return empty
 
-        mapping = {":": "arpeggiate", "[": "slurStart", "]": "slurStop"}
-        articulations = []
-        for char in suffix:
-            articulations.append(mapping[char])
-        return str.join("_", articulations)
+        # In kern [ ] _ are ties (start, end, middle of a chain); slurs would be ( ).
+        mapping = {
+            ":": ("arpeggiate",),
+            "[": ("tieStart",),
+            "]": ("tieStop",),
+            "_": ("tieStart", "tieStop"),
+        }
+        articulations = {part for char in suffix for part in mapping[char]}
+        return str.join("_", sorted(articulations))
 
     def parse_clef(self, clef: str) -> EncodedSymbol:
         clef_name = clef.split(maxsplit=1)[0].replace("*clef", "clef_")
