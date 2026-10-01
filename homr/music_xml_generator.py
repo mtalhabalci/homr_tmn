@@ -136,8 +136,10 @@ def slurs_on_equal_notes_as_ties(voice: list[EncodedSymbol]) -> list[EncodedSymb
     A slur joins different pitches; over two equal notes the curve can only hold the note on. On the
     page the two look alike, and much of the training data called every curve a slur, so the model
     reads some ties as slurs -- and a slur left there makes a reader play the note twice. Grace notes,
-    chords and a second note with a sign of its own are left alone.
+    chords, a second note with a sign of its own, and dotted or lined notes under a slur (portato, the
+    two notes played apart on purpose) are left alone.
     """
+    portato = {"staccato", "staccatissimo", "tenuto", "accent"}
     result = list(voice)
     notes = [i for i, s in enumerate(result) if s.rhythm.startswith("note") and s.pitch not in (empty, nonote)]
     for a, b in zip(notes, notes[1:], strict=False):
@@ -147,6 +149,8 @@ def slurs_on_equal_notes_as_ties(voice: list[EncodedSymbol]) -> list[EncodedSymb
             continue
         starts, stops = set(first.articulation.split("_")), set(second.articulation.split("_"))
         if not ("slurStart" in starts and "slurStop" in stops and first.pitch == second.pitch):
+            continue
+        if (starts | stops) & portato:
             continue
         if second.lift not in (empty, nonote, first.lift):
             continue

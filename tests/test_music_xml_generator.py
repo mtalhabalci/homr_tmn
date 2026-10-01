@@ -184,6 +184,15 @@ note_8 C5 _ slurStop upper""".splitlines()
         self.assertEqual([s.articulation for s in result if s.rhythm.startswith("note")],
                          ["tieStart", "tieStop", "slurStart", "slurStop"])
 
+    def test_a_slur_over_dotted_equal_notes_stays_a_slur(self) -> None:
+        """Portato: two B4s under one slur, each with a staccato dot (Lieder lc5667843)."""
+        tokens = read_token_lines(
+            """note_8 B4 _ slurStart_staccato upper
+note_8 B4 _ slurStop_staccato upper""".splitlines()
+        )
+        result = slurs_on_equal_notes_as_ties(tokens)
+        self.assertEqual([s.articulation for s in result], ["slurStart_staccato", "slurStop_staccato"])
+
     def test_a_slur_to_a_note_with_its_own_sign_stays_a_slur(self) -> None:
         tokens = read_token_lines(
             """note_4 F5 sharp4 slurStart upper
