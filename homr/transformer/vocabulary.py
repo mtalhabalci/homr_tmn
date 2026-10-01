@@ -110,6 +110,10 @@ def build_rhythm() -> dict[str, int]:
     # Evsat is counted in 26, a number the list above skips. Appended here rather than put in
     # its place among the others so that the indices of the tokens already trained do not move.
     rhythm.extend(f"timeSignature_26/{d}" for d in _time_denominators)
+    # Simile signs: a slash with two dots that fills a measure repeats the measure before; a
+    # shorter one (the saz answering the voice) repeats part of it. Handwritten copies draw them
+    # often. Appended last, again so that no trained index moves.
+    rhythm.extend(["measureRepeat", "beatRepeat"])
 
     # Dynamics
     # rhythm.extend(

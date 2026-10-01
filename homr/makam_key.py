@@ -104,8 +104,14 @@ def resolve_sounding(symbols: list[EncodedSymbol]) -> list[EncodedSymbol]:
     """
     key = MakamKey()
     resolved = []
+    previous = ""
     for symbol in symbols:
         if symbol.rhythm == key_accidental:
+            # A run of signature signs is the whole signature: a new one replaces the old rather than
+            # adding to it, as the <key> written for it does. A staff that does not restate the
+            # signature -- old prints often leave it off -- keeps the one before.
+            if previous != key_accidental:
+                key.signature.clear()
             key.read_signature(symbol.pitch, symbol.lift)
         elif _ends_measure(symbol.rhythm):
             key.start_measure()
@@ -119,5 +125,6 @@ def resolve_sounding(symbols: list[EncodedSymbol]) -> list[EncodedSymbol]:
             # zero, or a reader applying the signature would alter it anyway.
             if commas or symbol.lift == "N" or symbol.pitch[0] in key.signature:
                 symbol = symbol.with_sounding(lift_for_commas(commas))
+        previous = symbol.rhythm
         resolved.append(symbol)
     return resolved

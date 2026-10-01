@@ -1,3 +1,4 @@
+import copy
 import math
 from collections import defaultdict
 from dataclasses import dataclass
@@ -119,9 +120,46 @@ def generate_xml(
     root.add_child(build_part_list(has_two_staves_by_part))
     for index, staff in enumerate(staffs):
         root.add_child(
-            build_part(args, resolve_sounding(staff), index, has_two_staves_by_part[index])
+            build_part(
+                args,
+                resolve_sounding(slurs_on_equal_notes_as_ties(staff)),
+                index,
+                has_two_staves_by_part[index],
+            )
         )
     return root
+
+
+def slurs_on_equal_notes_as_ties(voice: list[EncodedSymbol]) -> list[EncodedSymbol]:
+    """A curve over two neighbouring notes of the same pitch is a tie, whatever the model called it.
+
+    A slur joins different pitches; over two equal notes the curve can only hold the note on. On the
+    page the two look alike, and much of the training data called every curve a slur, so the model
+    reads some ties as slurs -- and a slur left there makes a reader play the note twice. Grace notes,
+    chords and a second note with a sign of its own are left alone.
+    """
+    result = list(voice)
+    notes = [i for i, s in enumerate(result) if s.rhythm.startswith("note") and s.pitch not in (empty, nonote)]
+    for a, b in zip(notes, notes[1:], strict=False):
+        first, second = result[a], result[b]
+        near = result[max(0, a - 1) : b + 2]
+        if any(s.rhythm == "chord" for s in near) or "G" in first.rhythm or "G" in second.rhythm:
+            continue
+        starts, stops = set(first.articulation.split("_")), set(second.articulation.split("_"))
+        if not ("slurStart" in starts and "slurStop" in stops and first.pitch == second.pitch):
+            continue
+        if second.lift not in (empty, nonote, first.lift):
+            continue
+        result[a] = _swap_articulation(first, "slurStart", "tieStart")
+        result[b] = _swap_articulation(second, "slurStop", "tieStop")
+    return result
+
+
+def _swap_articulation(symbol: EncodedSymbol, old: str, new: str) -> EncodedSymbol:
+    parts = {p for p in symbol.articulation.split("_") if p and p != old} | {new}
+    result = copy.copy(symbol)
+    result.articulation = "_".join(sorted(parts))
+    return result
 
 
 def _voice_has_two_staves(voice: list[EncodedSymbol]) -> bool:
@@ -149,7 +187,23 @@ def build_measures(
     def close_current_measure() -> None:
         rebalance_measure_voices(current_measure)
         measures.append(current_measure)
+        played_before[:] = played_now
+        played_now.clear()
 
+    def add_notes(group: SymbolChord) -> None:
+        staff_positions = group.into_positions()
+        for pos_no, staff_pos in enumerate(staff_positions):
+            chord_duration = (
+                group.get_duration() if pos_no == len(staff_positions) - 1 else Fraction(0)
+            )
+            for note_xml in build_note_chord(staff_pos, state, chord_duration):
+                current_measure.add_child(note_xml)
+        played_now.append(group)
+
+    # The note groups of this measure and the one before: a measure-repeat sign plays the one
+    # before again, so its notes are written out once more (the musicxml elements cannot be copied).
+    played_now: list[SymbolChord] = []
+    played_before: list[SymbolChord] = []
     measure_number = 1
     groups = add_tuplet_start_stop(group_into_chords(voice))
     division, nominator = find_division_and_time_signature_nominator(groups)
@@ -176,13 +230,7 @@ def build_measures(
                 attributes = build_or_get_attributes(current_measure, last_attributes)
                 build_multi_measure_rest(symbol, attributes)
             else:
-                staff_positions = group.into_positions()
-                for pos_no, staff_pos in enumerate(staff_positions):
-                    chord_duration = (
-                        group.get_duration() if pos_no == len(staff_positions) - 1 else Fraction(0)
-                    )
-                    for note_xml in build_note_chord(staff_pos, state, chord_duration):
-                        current_measure.add_child(note_xml)
+                add_notes(group)
             continue
         if rhythm == "newline":
             is_last_measure = group_no == len(groups) - 1
@@ -267,8 +315,11 @@ def build_measures(
             elif measures:
                 barline = build_or_get_barline(measures[-1], "right")
                 build_barline_ending(symbol, barline, volta_number)
-        elif rhythm in ("segno", "coda", "daCapo", "daSegno"):
+        elif rhythm in ("segno", "coda", "daCapo", "daSegno", "beatRepeat"):
             build_direction(symbol, current_measure)
+        elif rhythm == "measureRepeat":
+            for earlier in list(played_before):
+                add_notes(earlier)
         else:
             eprint("Symbol isn't supported yet ", symbol)
 
@@ -528,6 +579,9 @@ def build_direction(symbol: EncodedSymbol, measure: mxl.XMLMeasure) -> None:
         direction_type.add_child(mxl.XMLSegno())
     elif symbol.rhythm == "coda":
         direction_type.add_child(mxl.XMLCoda())
+    elif symbol.rhythm == "beatRepeat":
+        # How much of the measure the sign repeats is not in the token, so it stays an instruction.
+        direction_type.add_child(mxl.XMLWords(value_="simile"))
     else:
         direction_type.add_child(mxl.XMLWords(value_="D.C." if symbol.rhythm == "daCapo" else "D.S."))
     direction.add_child(direction_type)

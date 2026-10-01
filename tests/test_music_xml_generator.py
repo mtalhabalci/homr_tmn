@@ -11,6 +11,7 @@ from homr.music_xml_generator import (
     XmlGeneratorArguments,
     generate_xml,
     rebalance_measure_voices,
+    slurs_on_equal_notes_as_ties,
 )
 from homr.transformer.vocabulary import EncodedSymbol
 from training.transformer.training_vocabulary import (
@@ -170,6 +171,41 @@ barline . . . ."""
         xml = generate_xml(XmlGeneratorArguments(), [tokens], "").to_string()
         self.assertIn('<tied type="start"', xml)
         self.assertIn('<tied type="stop"', xml)
+
+    def test_a_slur_over_two_equal_notes_is_a_tie(self) -> None:
+        tokens = read_token_lines(
+            """note_4 A4 _ slurStart upper
+barline . . . .
+note_8 A4 _ slurStop upper
+note_8 B4 _ slurStart upper
+note_8 C5 _ slurStop upper""".splitlines()
+        )
+        result = slurs_on_equal_notes_as_ties(tokens)
+        self.assertEqual([s.articulation for s in result if s.rhythm.startswith("note")],
+                         ["tieStart", "tieStop", "slurStart", "slurStop"])
+
+    def test_a_slur_to_a_note_with_its_own_sign_stays_a_slur(self) -> None:
+        tokens = read_token_lines(
+            """note_4 F5 sharp4 slurStart upper
+note_4 F5 N slurStop upper""".splitlines()
+        )
+        result = slurs_on_equal_notes_as_ties(tokens)
+        self.assertEqual([s.articulation for s in result], ["slurStart", "slurStop"])
+
+    def test_a_measure_repeat_plays_the_measure_before(self) -> None:
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+timeSignature_2/4 . . . .
+note_4 A4 _ _ upper
+note_4 C5 _ _ upper
+barline . . . .
+measureRepeat . . . .
+barline . . . .""".splitlines()
+        )
+        xml = generate_xml(XmlGeneratorArguments(), [tokens], "").to_string()
+        second = xml.split('<measure number="2"')[1]
+        self.assertEqual(second.count("<note"), 2)
+        self.assertIn("<step>C</step>", second)
 
     def test_begin_chord_with_standalone_rests(self) -> None:
         """

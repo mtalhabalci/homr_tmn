@@ -107,6 +107,34 @@ class TestMakamKey(unittest.TestCase):
         resolved = resolve_sounding(symbols)
         self.assertEqual(resolved[3].sounding, "N")
 
+    def test_a_new_signature_replaces_the_old_one(self) -> None:
+        """A section in another makam draws its own signature; the old signs do not linger."""
+        symbols = [
+            EncodedSymbol("keyAccidental", "B4", "flat1", "_", "upper"),
+            EncodedSymbol("keyAccidental", "F5", "sharp4", "_", "upper"),
+            note("note_8", "F5", "_"),
+            BARLINE,
+            EncodedSymbol("clef_G2", "_", "_", "_", "upper"),
+            EncodedSymbol("keyAccidental", "B4", "flat5", "_", "upper"),
+            note("note_8", "F5", "_"),
+            note("note_8", "B4", "_"),
+        ]
+        resolved = resolve_sounding(symbols)
+        self.assertEqual(resolved[2].sounding, "sharp4")
+        self.assertIsNone(resolved[6].sounding)
+        self.assertEqual(resolved[7].sounding, "flat5")
+
+    def test_a_staff_without_a_signature_keeps_the_last_one(self) -> None:
+        """Old prints leave the signature off continuation staffs."""
+        symbols = [
+            EncodedSymbol("keyAccidental", "B4", "flat1", "_", "upper"),
+            note("note_8", "C5", "_"),
+            BARLINE,
+            note("note_8", "B4", "_"),
+        ]
+        resolved = resolve_sounding(symbols)
+        self.assertEqual(resolved[3].sounding, "flat1")
+
     def test_rests_and_barlines_are_left_alone(self) -> None:
         symbols = [
             EncodedSymbol("keyAccidental", "B4", "flat1", "_", "upper"),
