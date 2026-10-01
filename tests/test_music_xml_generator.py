@@ -215,6 +215,29 @@ barline . . . .""".splitlines()
         second = xml.split('<measure number="2"')[1]
         self.assertEqual(second.count("<note"), 2)
         self.assertIn("<step>C</step>", second)
+        # the notes are there for playback; the measure-style makes a reader draw the % sign
+        self.assertIn('<measure-repeat type="start">1</measure-repeat>', second)
+
+    def test_signs_are_written_by_their_musicxml_names(self) -> None:
+        """MusicXML 4.0 names the THM numbered signs (flat-2 ...) and the AEU slash- signs."""
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+keyAccidental B4 flat2 _ upper
+timeSignature_2/4 . . . .
+note_4 F5 N tieStart upper
+note_4 F5 _ tieStop upper
+barline . . . .
+note_4 G5 ## _ upper
+note_4 E5 sharp3 _ upper
+barline . . . .""".splitlines()
+        )
+        xml = generate_xml(XmlGeneratorArguments(), [tokens], "").to_string()
+        self.assertIn("<key-accidental>flat-2</key-accidental>", xml)
+        for name in ("natural", "double-sharp", "sharp-3"):
+            self.assertIn(f"<accidental>{name}</accidental>", xml)
+        # a tie both drawn and sounding
+        self.assertIn('<tie type="start"', xml)
+        self.assertIn('<tie type="stop"', xml)
 
     def test_begin_chord_with_standalone_rests(self) -> None:
         """

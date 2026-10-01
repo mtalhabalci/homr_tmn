@@ -12,7 +12,6 @@ from homr.makam_key import resolve_sounding
 from homr.simple_logging import eprint
 from homr.transformer.vocabulary import (
     EncodedSymbol,
-    aeu_accidentals,
     empty,
     key_accidental,
     nonote,
@@ -194,7 +193,11 @@ def build_measures(
         played_before[:] = played_now
         played_now.clear()
 
-    def add_notes(group: SymbolChord) -> None:
+    def add_notes(group: SymbolChord, replayed: bool = False) -> None:
+        if repeat_shown and not replayed:
+            # the first measure of real notes after the % signs ends their display
+            _measure_repeat_style(current_measure, "stop")
+            repeat_shown.clear()
         staff_positions = group.into_positions()
         for pos_no, staff_pos in enumerate(staff_positions):
             chord_duration = (
@@ -208,6 +211,9 @@ def build_measures(
     # before again, so its notes are written out once more (the musicxml elements cannot be copied).
     played_now: list[SymbolChord] = []
     played_before: list[SymbolChord] = []
+    # MusicXML wants the repeated notes written out AND a measure-style that shows the sign
+    # instead, from the first % measure to the next measure of real notes; non-empty while shown.
+    repeat_shown: list[bool] = []
     measure_number = 1
     groups = add_tuplet_start_stop(group_into_chords(voice))
     division, nominator = find_division_and_time_signature_nominator(groups)
@@ -322,8 +328,11 @@ def build_measures(
         elif rhythm in ("segno", "coda", "daCapo", "daSegno", "beatRepeat"):
             build_direction(symbol, current_measure)
         elif rhythm == "measureRepeat":
+            if not repeat_shown:
+                _measure_repeat_style(current_measure, "start")
+                repeat_shown.append(True)
             for earlier in list(played_before):
-                add_notes(earlier)
+                add_notes(earlier, replayed=True)
         else:
             eprint("Symbol isn't supported yet ", symbol)
 
@@ -411,6 +420,17 @@ def build_or_get_attributes(
     attributes = mxl.XMLAttributes()
     measure.add_child(attributes)
     return attributes
+
+
+def _measure_repeat_style(measure: mxl.XMLMeasure, kind: str) -> None:
+    """Start or stop showing the one-measure repeat sign (%) from this measure on."""
+    existing = measure.get_children_of_type(mxl.XMLAttributes)
+    attributes = existing[0] if existing else mxl.XMLAttributes()
+    if not existing:
+        measure.add_child(attributes)
+    style = mxl.XMLMeasureStyle()
+    style.add_child(mxl.XMLMeasureRepeat(value_=1, type=kind))
+    attributes.add_child(style)
 
 
 def build_or_get_barline(measure: mxl.XMLMeasure, location: str) -> mxl.XMLBarline:
@@ -645,23 +665,28 @@ LIFT_TO_ALTER.update(
     }
 )
 
-# Printed glyph. MusicXML names only six of the ten makam accidentals, so the
-# 2- and 3-comma steps fall back to the nearest named glyph and lose a little
-# information on export - the <alter> above stays exact either way. Change this
-# table freely; it does not affect what the model learns.
+# Printed glyph. MusicXML 4.0 names both Turkish systems: the slash- glyphs of
+# Arel-Ezgi-Uzdilek, and the numbered ones of folk music (THM), "superscripted
+# versions of the accidental signs" -- a flat with a small 2 is flat-2. A plain
+# sign is the plain glyph, and the drawn natural and double signs are written out
+# too. The <alter> above carries the sounding pitch either way. Change this table
+# freely; it does not affect what the model learns.
 LIFT_TO_ACCIDENTAL = {
     "sharp1": "quarter-sharp",
-    "sharp2": "quarter-sharp",
-    "sharp3": "sharp",
+    "sharp2": "sharp-2",
+    "sharp3": "sharp-3",
     "sharp4": "sharp",
     "sharp5": "slash-quarter-sharp",
     "sharp8": "slash-sharp",
     "flat1": "quarter-flat",
-    "flat2": "quarter-flat",
-    "flat3": "slash-flat",
+    "flat2": "flat-2",
+    "flat3": "flat-3",
     "flat4": "slash-flat",
     "flat5": "flat",
     "flat8": "double-slash-flat",
+    "N": "natural",
+    "##": "double-sharp",
+    "bb": "flat-flat",
 }
 
 DURATION_NAMES = {
@@ -723,10 +748,11 @@ def build_articulations(
             notation.add_child(mxl.XMLSlur(type="start"))
         elif articulation == "slurStop":
             notation.add_child(mxl.XMLSlur(type="stop"))
-        elif articulation == "tieStart":
-            notation.add_child(mxl.XMLTied(type="start"))
-        elif articulation == "tieStop":
-            notation.add_child(mxl.XMLTied(type="stop"))
+        elif articulation in ("tieStart", "tieStop"):
+            # <tied> draws the tie, <tie> makes it sound as one note; MusicXML wants both.
+            kind = "start" if articulation == "tieStart" else "stop"
+            notation.add_child(mxl.XMLTied(type=kind))
+            note.add_child(mxl.XMLTie(type=kind))
         else:
             raise ValueError("Unsupported articulation " + articulation)
 
@@ -784,9 +810,9 @@ def build_note_or_rest(
                 if alter_value is not None:
                     pitch.add_child(mxl.XMLAlter(value_=alter_value))
         note.add_child(pitch)
-        # Emit an explicit <accidental> for the makam glyphs so the renderer
-        # (e.g. MuseScore) draws the correct microtonal symbol.
-        if model_note.lift in aeu_accidentals:
+        # Emit an explicit <accidental> for every sign the page draws, so the
+        # renderer (e.g. MuseScore) draws that symbol rather than its own guess.
+        if model_note.lift in LIFT_TO_ACCIDENTAL:
             note.add_child(mxl.XMLAccidental(value_=LIFT_TO_ACCIDENTAL[model_note.lift]))
 
     if "G" in model_note.rhythm:
