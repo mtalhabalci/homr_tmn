@@ -5,7 +5,12 @@ import torch.nn.functional as F
 from torch import nn
 
 from homr.transformer.configs import Config
-from homr.transformer.vocabulary import EncodedSymbol, has_rhythm_symbol_a_position
+from homr.transformer.vocabulary import (
+    LOOP_RUN,
+    EncodedSymbol,
+    ends_in_loop,
+    has_rhythm_symbol_a_position,
+)
 from training.architecture.transformer.custom_x_transformer import (
     AbsolutePositionalEmbedding,
     AttentionLayers,
@@ -336,6 +341,9 @@ class ScoreDecoder(nn.Module):
                 position=position_token[0],
             )
             symbols.append(symbol)
+            if ends_in_loop(symbols):
+                del symbols[-LOOP_RUN:]
+                break
 
             out_lift = torch.cat((out_lift, lift_sample), dim=-1)
             out_pitch = torch.cat((out_pitch, pitch_sample), dim=-1)

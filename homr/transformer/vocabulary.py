@@ -401,6 +401,23 @@ def kern_to_symbol_duration(kern: str) -> SymbolDuration:
         return SymbolDuration(base_duration, dots, actual_notes, normal_notes, normal_notes)
 
 
+# A greedy decoder that has lost its place -- on a blank staff, or one holding only lyrics -- writes one note
+# dozens of times (35 to 150 in the v17 page exams). Of the 86,114 v17 training labels none repeats a row more
+# than 19 times in a row (a recited türkü line), so a run of 32 is a loop, not music.
+LOOP_RUN = 32
+
+
+def ends_in_loop(symbols: "list[EncodedSymbol]") -> bool:
+    """True when the last LOOP_RUN symbols are one and the same row: the decoder should drop them and stop."""
+    if len(symbols) < LOOP_RUN:
+        return False
+    first = symbols[-LOOP_RUN]
+    return all(
+        (s.rhythm, s.pitch, s.lift) == (first.rhythm, first.pitch, first.lift)
+        for s in symbols[-LOOP_RUN:]
+    )
+
+
 class EncodedSymbol:
     """
     A musical symbol split into the different decoder branches.

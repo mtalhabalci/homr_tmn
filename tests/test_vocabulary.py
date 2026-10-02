@@ -2,7 +2,9 @@ import unittest
 from fractions import Fraction
 
 from homr.transformer.vocabulary import (
+    LOOP_RUN,
     EncodedSymbol,
+    ends_in_loop,
     kern_to_symbol_duration,
     remove_duplicated_symbols,
 )
@@ -204,3 +206,13 @@ barline . . . ."""
             duration = kern_to_symbol_duration(kern)
             self.assertEqual(duration.normal_notes, 1)
             self.assertEqual(duration.actual_notes, 1)
+
+    def test_ends_in_loop(self) -> None:
+        note = EncodedSymbol("note_8", "C5", "_", "_", "upper")
+        other = EncodedSymbol("note_8", "D5", "_", "_", "upper")
+        self.assertFalse(ends_in_loop([note] * (LOOP_RUN - 1)))
+        self.assertTrue(ends_in_loop([other] + [note] * LOOP_RUN))
+        # a different articulation does not break the loop, a different pitch does
+        slurred = EncodedSymbol("note_8", "C5", "_", "slurStart", "upper")
+        self.assertTrue(ends_in_loop([slurred] + [note] * (LOOP_RUN - 1)))
+        self.assertFalse(ends_in_loop([note] * (LOOP_RUN - 1) + [other]))

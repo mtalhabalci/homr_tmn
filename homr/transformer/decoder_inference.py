@@ -5,7 +5,7 @@ import onnxruntime as ort
 
 from homr.simple_logging import eprint
 from homr.transformer.configs import Config
-from homr.transformer.vocabulary import EncodedSymbol
+from homr.transformer.vocabulary import LOOP_RUN, EncodedSymbol, ends_in_loop
 from homr.type_definitions import NDArray
 
 
@@ -132,6 +132,9 @@ class ScoreDecoder:
                 coordinates=attention,
             )
             symbols.append(symbol)
+            if ends_in_loop(symbols):
+                del symbols[-LOOP_RUN:]
+                break
 
             out_lift = np.concatenate((out_lift, lift_sample), axis=-1)
             out_pitch = np.concatenate((out_pitch, pitch_sample), axis=-1)
