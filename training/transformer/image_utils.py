@@ -295,14 +295,49 @@ def apply_clahe(image: NDArray, p: float = 0.1) -> NDArray:
         return result
 
 
-def distort_image(image: NDArray, allow_occlusions: bool = False) -> NDArray:
+# A copyist the model has not seen slants the notes, wobbles the lines and holds the pen thicker or thinner. The
+# slant widens the picture instead of cutting the clef or the last note off, and the wobble (~2 px) moves a head
+# together with the lines around it, so the pitch it is read at stays the same.
+_NEW_HAND = A.Compose(
+    [
+        A.Affine(
+            shear={"x": (-10, 10), "y": (0, 0)},
+            scale={"x": (0.9, 1.1), "y": (1.0, 1.0)},
+            fit_output=True,
+            border_mode=cv2.BORDER_CONSTANT,
+            fill=255,
+            p=1.0,
+        ),
+        A.ElasticTransform(alpha=70, sigma=6, border_mode=cv2.BORDER_CONSTANT, fill=255, p=1.0),
+        A.OneOf(
+            [
+                A.Morphological(scale=(2, 2), operation="erosion", p=1.0),
+                A.Morphological(scale=(2, 3), operation="dilation", p=1.0),
+            ],
+            p=0.5,
+        ),
+    ]
+)
+
+
+def apply_new_hand(image: NDArray, p: float) -> NDArray:
+    """With probability p, redraw the staff as another hand might have: slant, wobble, pen width."""
+    if p <= 0 or np.random.random() >= p:
+        return image
+    return _NEW_HAND(image=image)["image"]
+
+
+def distort_image(image: NDArray, allow_occlusions: bool = False, new_hand_p: float = 0.0) -> NDArray:
     """
     Apply data augmentation to an image.
 
     Args:
         image: Input image array
         allow_occlusions: If True, applies occlusiv that may hide musical elements.
+        new_hand_p: Chance of redrawing the staff in an unseen hand (apply_new_hand).
     """
+
+    image = apply_new_hand(image, new_hand_p)
 
     # Add white margins as the staff detection would create something similiar
     image = add_random_margins(image, min_margin=0, max_margin=20, fill_white=True)

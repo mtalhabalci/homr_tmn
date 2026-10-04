@@ -27,6 +27,9 @@ git_root = os.path.join(script_location, "..", "..")
 
 label_names = ["rhythms", "positions", "lifts", "pitchs", "articulations"]
 
+# Picture folders of handwritten copies (makam training sets): dilbeyti, Erdinç Bal, TRT, the pools, Atkoşar.
+HANDWRITTEN_SETS = ("datasets/dilbeyti", "datasets/erdincbal", "datasets/trt-", "datasets/havuz-", "datasets/atkosar")
+
 
 class DataLoader:
     def __init__(
@@ -69,7 +72,12 @@ class DataLoader:
             np.random.seed(idx)
 
         if self.distort:
-            img = distort_image(img, allow_occlusions=not self.is_validation)
+            # Unseen hands are where the model is weakest (v18: ~80% on handwritten works it never saw against
+            # 98-99% on prints), so handwritten staffs are redrawn in a new hand half the time, prints rarely.
+            new_hand_p = 0.0
+            if not self.is_validation:
+                new_hand_p = 0.5 if any(s in entry["image"] for s in HANDWRITTEN_SETS) else 0.1
+            img = distort_image(img, allow_occlusions=not self.is_validation, new_hand_p=new_hand_p)
         img = add_image_into_tr_omr_canvas(img)
 
         if self.is_validation:
