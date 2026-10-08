@@ -7,8 +7,10 @@ from torch import nn
 from homr.transformer.configs import Config
 from homr.transformer.vocabulary import (
     LOOP_RUN,
+    RHYTHM_ALTERNATIVES,
     EncodedSymbol,
     ends_in_loop,
+    fix_measure_sums,
     has_rhythm_symbol_a_position,
     misread_opening_meter,
     nonote,
@@ -294,6 +296,7 @@ class ScoreDecoder(nn.Module):
             mask = torch.ones((1, 1), dtype=torch.bool, device=self.device)
 
         symbols: list[EncodedSymbol] = []
+        alternatives: list[list[tuple[str, float]]] = []
 
         cache = init_cache(0, self.device)[0]
 
@@ -353,8 +356,16 @@ class ScoreDecoder(nn.Module):
                 position=position_token[0],
             )
             symbols.append(symbol)
+            # the best rhythm choices of this step, the chosen one first, for fix_measure_sums
+            logp = torch.log_softmax(rhythmsp[0, -1, :].float(), dim=-1)
+            chosen = int(rhythm_sample[0][0])
+            top = logp.topk(RHYTHM_ALTERNATIVES)
+            alternatives.append([(self.inv_rhythm_vocab[chosen], float(logp[chosen]))] + [
+                (self.inv_rhythm_vocab[int(i)], float(v)) for v, i in zip(top.values, top.indices) if int(i) != chosen
+            ])
             if ends_in_loop(symbols):
                 del symbols[-LOOP_RUN:]
+                del alternatives[-LOOP_RUN:]
                 break
 
             out_lift = torch.cat((out_lift, lift_sample), dim=-1)
@@ -363,6 +374,7 @@ class ScoreDecoder(nn.Module):
             out_articulations = torch.cat((out_articulations, articulation_sample), dim=-1)
             mask = F.pad(mask, (0, 1), value=True)
 
+        fix_measure_sums(symbols, alternatives)
         self.net.train(was_training)
         return symbols
 

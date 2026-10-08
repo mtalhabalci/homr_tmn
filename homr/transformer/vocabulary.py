@@ -433,6 +433,89 @@ def misread_opening_meter(symbols: "list[EncodedSymbol]", rhythm: str) -> bool:
     )
 
 
+MEASURE_ENDS = ("barline", "doublebarline", "bolddoublebarline", "repeatStart", "repeatEnd", "repeatEndStart")
+RHYTHM_ALTERNATIVES = 6  # how many rhythm choices the decoder keeps per step for fix_measure_sums
+
+
+def _beats(rhythm: str) -> Fraction:
+    """A note's or rest's length as a fraction of a whole note; grace notes and everything else take no time."""
+    if rhythm.startswith(("note_", "rest_")) and "G" not in rhythm:
+        return EncodedSymbol(rhythm).get_duration().fraction
+    return Fraction(0)
+
+
+def fix_measure_sums(
+    symbols: "list[EncodedSymbol]",
+    alternatives: "list[list[tuple[str, float]]]",
+    max_changes: int = 2,
+    max_cost: float = 3.0,
+) -> int:
+    """Make measures add up to the time signature by re-choosing at most max_changes durations.
+
+    The commonest misreads on handwriting are durations (a double beam read as one, a dot missed) and they leave the
+    measure too long or too short. alternatives[i] holds the decoder's best rhythm choices for symbols[i] with their
+    log-probabilities, best first. In every measure closed by barlines on both sides whose notes and rests do not
+    add up to the time signature, the cheapest set of at most max_changes swaps -- a note only for another note, a
+    rest for another rest, cost = the log-probability given up -- that makes it add up is applied, if it costs no
+    more than max_cost. A staff without a time signature uses the length most of its measures agree on.
+    Returns the number of symbols changed. Off unless HOMR_MEASURE_FIX=1 (still being measured).
+    """
+    if os.environ.get("HOMR_MEASURE_FIX", "0") != "1":
+        return 0
+    max_changes = int(os.environ.get("HOMR_MEASURE_FIX_CHANGES", max_changes))
+    max_cost = float(os.environ.get("HOMR_MEASURE_FIX_COST", max_cost))
+    measures, start, meter = [], None, None
+    for i, s in enumerate(symbols):
+        if s.rhythm.startswith("timeSignature_"):
+            meter = Fraction(s.rhythm.split("_", 1)[1])
+        if s.rhythm.startswith(MEASURE_ENDS):
+            if start is not None:
+                measures.append((start, i, meter))
+            start = i + 1
+    if not measures:
+        return 0
+    if all(m is None for _, _, m in measures):  # no time signature on the staff: the length most measures share
+        lengths = [sum((_beats(symbols[k].rhythm) for k in range(a, b)), Fraction(0)) for a, b, _ in measures]
+        common = max(set(lengths), key=lengths.count)
+        if lengths.count(common) < 2 or lengths.count(common) * 2 <= len(lengths) or common == 0:
+            return 0
+        measures = [(a, b, common) for a, b, _ in measures]
+    changed = 0
+    for a, b, meter in measures:
+        timed = [k for k in range(a, b) if _beats(symbols[k].rhythm) > 0]
+        if meter is None or not timed:
+            continue
+        total = sum((_beats(symbols[k].rhythm) for k in timed), Fraction(0))
+        if total == meter:
+            continue
+        # cheapest way to every reachable total: {(total, changes): (cost, swaps)}
+        states: dict[tuple[Fraction, int], tuple[float, list[tuple[int, str]]]] = {(Fraction(0), 0): (0.0, [])}
+        for k in timed:
+            kind = symbols[k].rhythm.split("_", 1)[0]
+            options = alternatives[k] if k < len(alternatives) and alternatives[k] else [(symbols[k].rhythm, 0.0)]
+            best = options[0][1]
+            choices = [(symbols[k].rhythm, 0.0)] + [
+                (r, best - p) for r, p in options[1:]
+                if r.split("_", 1)[0] == kind and "G" not in r and _beats(r) > 0 and r != symbols[k].rhythm
+            ]
+            nxt: dict[tuple[Fraction, int], tuple[float, list[tuple[int, str]]]] = {}
+            for (length, n), (cost, swaps) in states.items():
+                for rhythm, extra in choices:
+                    swap = rhythm != symbols[k].rhythm
+                    key = (length + _beats(rhythm), n + swap)
+                    if key[1] > max_changes or cost + extra > max_cost:
+                        continue
+                    if key not in nxt or cost + extra < nxt[key][0]:
+                        nxt[key] = (cost + extra, swaps + ([(k, rhythm)] if swap else []))
+            states = nxt
+        fits = [v for (length, _), v in states.items() if length == meter]
+        if fits:
+            for k, rhythm in min(fits, key=lambda v: v[0])[1]:
+                symbols[k].rhythm = rhythm
+                changed += 1
+    return changed
+
+
 class EncodedSymbol:
     """
     A musical symbol split into the different decoder branches.

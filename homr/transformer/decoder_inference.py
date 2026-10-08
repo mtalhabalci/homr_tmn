@@ -7,8 +7,10 @@ from homr.simple_logging import eprint
 from homr.transformer.configs import Config
 from homr.transformer.vocabulary import (
     LOOP_RUN,
+    RHYTHM_ALTERNATIVES,
     EncodedSymbol,
     ends_in_loop,
+    fix_measure_sums,
     misread_opening_meter,
     nonote,
 )
@@ -75,6 +77,7 @@ class ScoreDecoder:
         context_reduced = kwargs["context"][:, :1]
 
         symbols: list[EncodedSymbol] = []
+        alternatives: list[list[tuple[str, float]]] = []
 
         for step in range(self.max_seq_len):
             x_lift = out_lift[:, -1:]  # for all: shape=(1,1)
@@ -149,8 +152,17 @@ class ScoreDecoder:
                 coordinates=attention,
             )
             symbols.append(symbol)
+            # the best rhythm choices of this step, the chosen one first, for fix_measure_sums
+            row = rhythmsp[0, -1, :].astype(np.float64)
+            logp = row - (row.max() + np.log(np.exp(row - row.max()).sum()))
+            chosen = int(rhythm_sample[0][0])
+            alternatives.append([(self.inv_rhythm_vocab[chosen], float(logp[chosen]))] + [
+                (self.inv_rhythm_vocab[int(i)], float(logp[i]))
+                for i in np.argsort(-logp)[:RHYTHM_ALTERNATIVES] if int(i) != chosen
+            ])
             if ends_in_loop(symbols):
                 del symbols[-LOOP_RUN:]
+                del alternatives[-LOOP_RUN:]
                 break
 
             out_lift = np.concatenate((out_lift, lift_sample), axis=-1)
@@ -158,6 +170,7 @@ class ScoreDecoder:
             out_rhythm = np.concatenate((out_rhythm, rhythm_sample), axis=-1)
             out_articulations = np.concatenate((out_articulations, articulation_sample), axis=-1)
 
+        fix_measure_sums(symbols, alternatives)
         return symbols
 
     def init_cache(self, cache_len: int = 0) -> tuple[list[NDArray], list[str], list[str]]:

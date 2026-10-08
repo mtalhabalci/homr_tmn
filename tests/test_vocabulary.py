@@ -1,3 +1,4 @@
+import os
 import unittest
 from fractions import Fraction
 
@@ -5,6 +6,7 @@ from homr.transformer.vocabulary import (
     LOOP_RUN,
     EncodedSymbol,
     ends_in_loop,
+    fix_measure_sums,
     kern_to_symbol_duration,
     misread_opening_meter,
     remove_duplicated_symbols,
@@ -228,3 +230,29 @@ barline . . . ."""
         # anywhere else it is left alone, and so is any other rest
         self.assertFalse(misread_opening_meter([clef, key, note], "rest_64."))
         self.assertFalse(misread_opening_meter([clef, key], "rest_8"))
+
+    def test_fix_measure_sums(self) -> None:
+        def staff(*rhythms: str) -> list[EncodedSymbol]:
+            return [EncodedSymbol(r, "C5", "_", "_", "upper") if r.startswith("note") else EncodedSymbol(r)
+                    for r in rhythms]
+
+        os.environ["HOMR_MEASURE_FIX"] = "1"
+        try:
+            # 4/4 read as 4 4 4 8: the last note's second choice, a quarter, makes the measure add up
+            symbols = staff("clef_G2", "timeSignature_4/4", "barline", "note_4", "note_4", "note_4", "note_8",
+                            "barline")
+            alternatives = [[(s.rhythm, -0.1)] for s in symbols]
+            alternatives[6] = [("note_8", -0.5), ("note_4", -1.2), ("rest_4", -0.9)]
+            self.assertEqual(fix_measure_sums(symbols, alternatives), 1)
+            self.assertEqual(symbols[6].rhythm, "note_4")
+            # a measure that adds up is left alone, and so is one whose fix would cost too much
+            self.assertEqual(fix_measure_sums(symbols, alternatives), 0)
+            symbols[6].rhythm = "note_8"
+            alternatives[6] = [("note_8", -0.1), ("note_4", -9.0)]
+            self.assertEqual(fix_measure_sums(symbols, alternatives), 0)
+            # the first and last measures may run on from or to the next staff: never touched
+            open_ends = staff("clef_G2", "timeSignature_4/4", "note_8", "barline", "note_4")
+            self.assertEqual(fix_measure_sums(open_ends, [[(s.rhythm, 0.0), ("note_2", -0.1)] for s in open_ends]),
+                             0)
+        finally:
+            del os.environ["HOMR_MEASURE_FIX"]
