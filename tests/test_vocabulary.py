@@ -6,6 +6,7 @@ from homr.transformer.vocabulary import (
     EncodedSymbol,
     ends_in_loop,
     kern_to_symbol_duration,
+    misread_opening_meter,
     remove_duplicated_symbols,
 )
 from training.transformer.training_vocabulary import (
@@ -216,3 +217,14 @@ barline . . . ."""
         slurred = EncodedSymbol("note_8", "C5", "_", "slurStart", "upper")
         self.assertTrue(ends_in_loop([slurred] + [note] * (LOOP_RUN - 1)))
         self.assertFalse(ends_in_loop([note] * (LOOP_RUN - 1) + [other]))
+
+    def test_misread_opening_meter(self) -> None:
+        clef = EncodedSymbol("clef_G2")
+        key = EncodedSymbol("keyAccidental", "B4", "flat1")
+        note = EncodedSymbol("note_8", "C5", "_", "_", "upper")
+        # a 64th rest right after clef and key is a time signature the model failed to read
+        self.assertTrue(misread_opening_meter([clef, key], "rest_64."))
+        self.assertTrue(misread_opening_meter([], "rest_64"))
+        # anywhere else it is left alone, and so is any other rest
+        self.assertFalse(misread_opening_meter([clef, key, note], "rest_64."))
+        self.assertFalse(misread_opening_meter([clef, key], "rest_8"))

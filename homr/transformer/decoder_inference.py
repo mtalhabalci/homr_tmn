@@ -5,7 +5,13 @@ import onnxruntime as ort
 
 from homr.simple_logging import eprint
 from homr.transformer.configs import Config
-from homr.transformer.vocabulary import LOOP_RUN, EncodedSymbol, ends_in_loop
+from homr.transformer.vocabulary import (
+    LOOP_RUN,
+    EncodedSymbol,
+    ends_in_loop,
+    misread_opening_meter,
+    nonote,
+)
 from homr.type_definitions import NDArray
 
 
@@ -31,6 +37,8 @@ class ScoreDecoder:
         self.inv_lift_vocab = {v: k for k, v in config.lift_vocab.items()}
         self.inv_articulation_vocab = {v: k for k, v in config.articulation_vocab.items()}
         self.inv_position_vocab = {v: k for k, v in config.position_vocab.items()}
+        # the time signatures, for a 64th rest picked at the opening of a staff (misread_opening_meter)
+        self.meter_ids = [i for t, i in config.rhythm_vocab.items() if t.startswith("timeSignature")]
 
         self.fp16 = fp16
         self.use_gpu = use_gpu
@@ -113,6 +121,15 @@ class ScoreDecoder:
             lift_sample = np.array([[liftsp[:, -1, :].argmax()]])
             articulation_sample = np.array([[articulationsp[:, -1, :].argmax()]])
             position_sample = np.array([[positionsp[:, -1, :].argmax()]])
+
+            if misread_opening_meter(symbols, self.inv_rhythm_vocab[int(rhythm_sample[0][0])]):
+                meters = rhythmsp[0, -1, self.meter_ids]
+                as_input = lambda token: np.array([[token]], dtype=rhythm_sample.dtype)  # noqa: E731
+                rhythm_sample = as_input(self.meter_ids[int(meters.argmax())])
+                pitch_sample = as_input(self.config.pitch_vocab[nonote])
+                lift_sample = as_input(self.config.lift_vocab[nonote])
+                articulation_sample = as_input(self.config.articulation_vocab[nonote])
+                position_sample = as_input(self.config.position_vocab[nonote])
 
             lift_token = detokenize(lift_sample, self.inv_lift_vocab)
             pitch_token = detokenize(pitch_sample, self.inv_pitch_vocab)

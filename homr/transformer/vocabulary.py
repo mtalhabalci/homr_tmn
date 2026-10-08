@@ -1,5 +1,6 @@
 import copy
 import itertools
+import os
 import random
 import re
 from fractions import Fraction
@@ -415,6 +416,20 @@ def ends_in_loop(symbols: "list[EncodedSymbol]") -> bool:
     return all(
         (s.rhythm, s.pitch, s.lift) == (first.rhythm, first.pitch, first.lift)
         for s in symbols[-LOOP_RUN:]
+    )
+
+
+def misread_opening_meter(symbols: "list[EncodedSymbol]", rhythm: str) -> bool:
+    """True when the decoder picks a 64th rest at the opening of a staff, before anything but clef and key.
+
+    v20 (four times the freehand handwriting) began to read a handwritten time signature there as "rest_64." --
+    a dotted 64th rest no label holds in that place. The decoder then takes its best time signature instead.
+    HOMR_NO_METER_FIX=1 turns the rule off, to measure a model without it.
+    """
+    if os.environ.get("HOMR_NO_METER_FIX"):
+        return False
+    return rhythm.startswith("rest_64") and all(
+        s.rhythm.startswith(("clef", "keyAccidental")) for s in symbols
     )
 
 

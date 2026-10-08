@@ -10,6 +10,8 @@ from homr.transformer.vocabulary import (
     EncodedSymbol,
     ends_in_loop,
     has_rhythm_symbol_a_position,
+    misread_opening_meter,
+    nonote,
 )
 from training.architecture.transformer.custom_x_transformer import (
     AbsolutePositionalEmbedding,
@@ -255,6 +257,8 @@ class ScoreDecoder(nn.Module):
             if has_rhythm_symbol_a_position(rhythm_symbol):
                 note_mask[index] = 1
         self.note_mask = nn.Parameter(note_mask)
+        # the time signatures, for a 64th rest picked at the opening of a staff (misread_opening_meter)
+        self.meter_ids = [i for t, i in config.rhythm_vocab.items() if t.startswith("timeSignature")]
 
         # Weight the actual lift tokens (so neither nonote nor null) higher
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -323,6 +327,14 @@ class ScoreDecoder(nn.Module):
             lift_sample = liftsp[:, -1, :].argmax(dim=-1, keepdim=True)
             articulation_sample = articulationsp[:, -1, :].argmax(dim=-1, keepdim=True)
             position_sample = positionsp[:, -1, :].argmax(dim=-1, keepdim=True)
+
+            if misread_opening_meter(symbols, self.inv_rhythm_vocab[int(rhythm_sample[0][0])]):
+                meters = rhythmsp[0, -1, self.meter_ids]
+                rhythm_sample[0][0] = self.meter_ids[int(meters.argmax())]
+                pitch_sample[0][0] = self.config.pitch_vocab[nonote]
+                lift_sample[0][0] = self.config.lift_vocab[nonote]
+                articulation_sample[0][0] = self.config.articulation_vocab[nonote]
+                position_sample[0][0] = self.config.position_vocab[nonote]
 
             lift_token = detokenize(lift_sample, self.inv_lift_vocab)
             pitch_token = detokenize(pitch_sample, self.inv_pitch_vocab)
