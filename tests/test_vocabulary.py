@@ -254,5 +254,21 @@ barline . . . ."""
             open_ends = staff("clef_G2", "timeSignature_4/4", "note_8", "barline", "note_4")
             self.assertEqual(fix_measure_sums(open_ends, [[(s.rhythm, 0.0), ("note_2", -0.1)] for s in open_ends]),
                              0)
+            # measures that agree on 5/8 under a 4/8 signature: the signature is the odd one out, notes stay
+            aksak = staff("clef_G2", "timeSignature_4/8", "barline", "note_4", "note_4", "note_8", "barline",
+                          "note_4", "note_4", "note_8", "barline")
+            self.assertEqual(fix_measure_sums(aksak, [[(s.rhythm, 0.0), ("note_8", -0.1)] for s in aksak]), 0)
+            # ... unless the decoder's next-best time signature fits the measures and is likely enough
+            meters = [[(s.rhythm, 0.0)] for s in aksak]
+            meters[1] = [("timeSignature_4/8", -0.4), ("timeSignature_2/8", -0.9), ("timeSignature_5/8", -2.4)]
+            self.assertEqual(fix_measure_sums(aksak, meters), 0)
+            meters[1][2] = ("timeSignature_5/8", -1.1)
+            os.environ["HOMR_MEASURE_FIX_METER"] = "0"
+            self.assertEqual(fix_measure_sums(aksak, meters), 0)
+            del os.environ["HOMR_MEASURE_FIX_METER"]
+            self.assertEqual(fix_measure_sums(aksak, meters), 1)
+            self.assertEqual(aksak[1].rhythm, "timeSignature_5/8")
+            self.assertEqual([s.rhythm for s in aksak[3:6]], ["note_4", "note_4", "note_8"])
         finally:
+            os.environ.pop("HOMR_MEASURE_FIX_METER", None)
             del os.environ["HOMR_MEASURE_FIX"]

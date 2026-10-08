@@ -152,13 +152,15 @@ class ScoreDecoder:
                 coordinates=attention,
             )
             symbols.append(symbol)
-            # the best rhythm choices of this step, the chosen one first, for fix_measure_sums
+            # the best rhythm choices of this step, the chosen one first, for fix_measure_sums;
+            # at a time signature the best other time signatures, which it may take instead
             row = rhythmsp[0, -1, :].astype(np.float64)
             logp = row - (row.max() + np.log(np.exp(row - row.max()).sum()))
             chosen = int(rhythm_sample[0][0])
+            pool = np.array(self.meter_ids) if chosen in self.meter_ids else np.arange(len(logp))
             alternatives.append([(self.inv_rhythm_vocab[chosen], float(logp[chosen]))] + [
                 (self.inv_rhythm_vocab[int(i)], float(logp[i]))
-                for i in np.argsort(-logp)[:RHYTHM_ALTERNATIVES] if int(i) != chosen
+                for i in pool[np.argsort(-logp[pool])[:RHYTHM_ALTERNATIVES]] if int(i) != chosen
             ])
             if ends_in_loop(symbols):
                 del symbols[-LOOP_RUN:]

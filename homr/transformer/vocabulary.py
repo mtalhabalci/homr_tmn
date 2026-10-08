@@ -449,6 +449,7 @@ def fix_measure_sums(
     alternatives: "list[list[tuple[str, float]]]",
     max_changes: int = 2,
     max_cost: float = 3.0,
+    max_meter_cost: float = 1.6,
 ) -> int:
     """Make measures add up to the time signature by re-choosing at most max_changes durations.
 
@@ -458,29 +459,69 @@ def fix_measure_sums(
     add up to the time signature, the cheapest set of at most max_changes swaps -- a note only for another note, a
     rest for another rest, cost = the log-probability given up -- that makes it add up is applied, if it costs no
     more than max_cost. A staff without a time signature uses the length most of its measures agree on.
-    Returns the number of symbols changed. Off unless HOMR_MEASURE_FIX=1 (still being measured).
+
+    Measures that agree with each other but not with their time signature make the signature the odd one out. The
+    decoder's next-best time signature of the measures' length is then taken, if it is at least a fifth as likely
+    as the one read (max_meter_cost, in log-probability; alternatives[i] of a time signature holds the other time
+    signatures). Otherwise those notes are left alone: the signature may be printed over music in another usul, as in
+    the synthetic usul exam, or a copyist may bar a 10/8 every 5/8. On v20's clean exams the meter step made 6
+    changes on handwriting at a cost of 0.39-1.91, the one wrong one at 1.82, and 16 on the synthetic usul exam, all
+    wrong, at 1.99-2.99; none on the printed test. Returns the number of symbols changed. Off unless
+    HOMR_MEASURE_FIX=1 (still being measured); HOMR_MEASURE_FIX_METER=0 keeps the time signatures as read.
     """
     if os.environ.get("HOMR_MEASURE_FIX", "0") != "1":
         return 0
     max_changes = int(os.environ.get("HOMR_MEASURE_FIX_CHANGES", max_changes))
     max_cost = float(os.environ.get("HOMR_MEASURE_FIX_COST", max_cost))
-    measures, start, meter = [], None, None
+    max_meter_cost = float(os.environ.get("HOMR_MEASURE_FIX_METER_COST", max_meter_cost))
+    rechoose_meter = os.environ.get("HOMR_MEASURE_FIX_METER", "1") == "1"
+    # (first symbol, closing barline, index of the time signature it is under or None)
+    spans: list[tuple[int, int, int | None]] = []
+    start: int | None = None
+    source: int | None = None
     for i, s in enumerate(symbols):
         if s.rhythm.startswith("timeSignature_"):
-            meter = Fraction(s.rhythm.split("_", 1)[1])
+            source = i
         if s.rhythm.startswith(MEASURE_ENDS):
             if start is not None:
-                measures.append((start, i, meter))
+                spans.append((start, i, source))
             start = i + 1
-    if not measures:
+    if not spans:
         return 0
-    if all(m is None for _, _, m in measures):  # no time signature on the staff: the length most measures share
-        lengths = [sum((_beats(symbols[k].rhythm) for k in range(a, b)), Fraction(0)) for a, b, _ in measures]
-        common = max(set(lengths), key=lengths.count)
-        if lengths.count(common) < 2 or lengths.count(common) * 2 <= len(lengths) or common == 0:
-            return 0
-        measures = [(a, b, common) for a, b, _ in measures]
+    lengths = [sum((_beats(symbols[k].rhythm) for k in range(a, b)), Fraction(0)) for a, b, _ in spans]
+
+    def agreed(group: "list[Fraction]") -> "Fraction | None":
+        """The length most of these measures share, when at least two and more than half of them do."""
+        common = max(set(group), key=group.count)
+        return common if common and group.count(common) >= 2 and group.count(common) * 2 > len(group) else None
+
+    def meter_of(rhythm: str) -> Fraction:
+        return Fraction(rhythm.split("_", 1)[1])
+
     changed = 0
+    if all(src is None for _, _, src in spans):  # no time signature on the staff: the length most measures share
+        common = agreed(lengths)
+        if common is None:
+            return 0
+        measures = [(a, b, common) for a, b, _ in spans]
+    else:
+        target: dict[int, Fraction | None] = {}
+        for src in {src for _, _, src in spans if src is not None}:
+            meter = meter_of(symbols[src].rhythm)
+            common = agreed([n for (_, _, s), n in zip(spans, lengths) if s == src])
+            target[src] = meter
+            if common is None or common == meter:
+                continue
+            target[src] = None
+            if rechoose_meter and src < len(alternatives) and alternatives[src]:
+                best = alternatives[src][0][1]
+                fitting = [(best - p, r) for r, p in alternatives[src][1:]
+                           if r.startswith("timeSignature_") and meter_of(r) == common and best - p <= max_meter_cost]
+                if fitting:
+                    symbols[src].rhythm = min(fitting)[1]
+                    target[src] = common
+                    changed += 1
+        measures = [(a, b, None if src is None else target[src]) for a, b, src in spans]
     for a, b, meter in measures:
         timed = [k for k in range(a, b) if _beats(symbols[k].rhythm) > 0]
         if meter is None or not timed:

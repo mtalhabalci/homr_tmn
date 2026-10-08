@@ -356,12 +356,15 @@ class ScoreDecoder(nn.Module):
                 position=position_token[0],
             )
             symbols.append(symbol)
-            # the best rhythm choices of this step, the chosen one first, for fix_measure_sums
+            # the best rhythm choices of this step, the chosen one first, for fix_measure_sums;
+            # at a time signature the best other time signatures, which it may take instead
             logp = torch.log_softmax(rhythmsp[0, -1, :].float(), dim=-1)
             chosen = int(rhythm_sample[0][0])
-            top = logp.topk(RHYTHM_ALTERNATIVES)
+            pool = torch.tensor(self.meter_ids if chosen in self.meter_ids else range(len(logp)), device=logp.device)
+            top = logp[pool].topk(RHYTHM_ALTERNATIVES)
             alternatives.append([(self.inv_rhythm_vocab[chosen], float(logp[chosen]))] + [
-                (self.inv_rhythm_vocab[int(i)], float(v)) for v, i in zip(top.values, top.indices) if int(i) != chosen
+                (self.inv_rhythm_vocab[int(i)], float(v)) for v, i in zip(top.values, pool[top.indices])
+                if int(i) != chosen
             ])
             if ends_in_loop(symbols):
                 del symbols[-LOOP_RUN:]
