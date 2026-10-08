@@ -236,13 +236,16 @@ barline . . . ."""
             return [EncodedSymbol(r, "C5", "_", "_", "upper") if r.startswith("note") else EncodedSymbol(r)
                     for r in rhythms]
 
-        os.environ["HOMR_MEASURE_FIX"] = "1"
+        os.environ.pop("HOMR_MEASURE_FIX", None)  # on by default
         try:
             # 4/4 read as 4 4 4 8: the last note's second choice, a quarter, makes the measure add up
             symbols = staff("clef_G2", "timeSignature_4/4", "barline", "note_4", "note_4", "note_4", "note_8",
                             "barline")
             alternatives = [[(s.rhythm, -0.1)] for s in symbols]
             alternatives[6] = [("note_8", -0.5), ("note_4", -1.2), ("rest_4", -0.9)]
+            os.environ["HOMR_MEASURE_FIX"] = "0"
+            self.assertEqual(fix_measure_sums(symbols, alternatives), 0)
+            del os.environ["HOMR_MEASURE_FIX"]
             self.assertEqual(fix_measure_sums(symbols, alternatives), 1)
             self.assertEqual(symbols[6].rhythm, "note_4")
             # a measure that adds up is left alone, and so is one whose fix would cost too much
@@ -271,4 +274,4 @@ barline . . . ."""
             self.assertEqual([s.rhythm for s in aksak[3:6]], ["note_4", "note_4", "note_8"])
         finally:
             os.environ.pop("HOMR_MEASURE_FIX_METER", None)
-            del os.environ["HOMR_MEASURE_FIX"]
+            os.environ.pop("HOMR_MEASURE_FIX", None)

@@ -466,10 +466,10 @@ def fix_measure_sums(
     signatures). Otherwise those notes are left alone: the signature may be printed over music in another usul, as in
     the synthetic usul exam, or a copyist may bar a 10/8 every 5/8. On v20's clean exams the meter step made 6
     changes on handwriting at a cost of 0.39-1.91, the one wrong one at 1.82, and 16 on the synthetic usul exam, all
-    wrong, at 1.99-2.99; none on the printed test. Returns the number of symbols changed. Off unless
-    HOMR_MEASURE_FIX=1 (still being measured); HOMR_MEASURE_FIX_METER=0 keeps the time signatures as read.
+    wrong, at 1.99-2.99; none on the printed test. Returns the number of symbols changed. HOMR_MEASURE_FIX=0 turns
+    the fix off, to measure a model without it; HOMR_MEASURE_FIX_METER=0 keeps the time signatures as read.
     """
-    if os.environ.get("HOMR_MEASURE_FIX", "0") != "1":
+    if os.environ.get("HOMR_MEASURE_FIX", "1") != "1":
         return 0
     max_changes = int(os.environ.get("HOMR_MEASURE_FIX_CHANGES", max_changes))
     max_cost = float(os.environ.get("HOMR_MEASURE_FIX_COST", max_cost))
