@@ -2404,6 +2404,7 @@
         <direction-type>
           <segno />
         </direction-type>
+        <sound segno="segno1" />
       </direction>
       <barline location="left">
         <repeat direction="forward" />
@@ -5121,6 +5122,7 @@
         <direction-type>
           <segno />
         </direction-type>
+        <sound segno="segno2" />
       </direction>
     </measure>
   </part>

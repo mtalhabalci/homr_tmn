@@ -1308,6 +1308,7 @@
         <direction-type>
           <segno />
         </direction-type>
+        <sound segno="segno1" />
       </direction>
       <note>
         <rest />
@@ -2495,15 +2496,16 @@
         <staff>1</staff>
         <notations />
       </note>
-      <barline location="right">
-        <bar-style>light-light</bar-style>
-        <ending type="discontinue" number="1" />
-      </barline>
       <direction>
         <direction-type>
           <segno />
         </direction-type>
+        <sound segno="segno2" />
       </direction>
+      <barline location="right">
+        <bar-style>light-light</bar-style>
+        <ending type="discontinue" number="1" />
+      </barline>
     </measure>
   </part>
 </score-partwise>

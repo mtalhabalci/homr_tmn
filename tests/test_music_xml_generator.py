@@ -302,7 +302,7 @@ voltaStop . . . .
 newline . . . .
 repeatStart . . . .
 note_2 F5 _ _ upper
-barline . . . .
+bolddoublebarline . . . .
 coda . . . .""".splitlines()
         )
         root = ET.fromstring(generate_xml(XmlGeneratorArguments(), [tokens], "").to_string())
@@ -317,7 +317,33 @@ coda . . . .""".splitlines()
         self.assertEqual(endings, [("2", "left", "start", "1"), ("2", "right", "stop", "1"),
                                    ("3", "left", "start", "2"), ("3", "right", "stop", "2")])
         self.assertIsNotNone(measures[3].find("direction/direction-type/coda"))
+        last = [c.tag for c in measures[3]]
+        self.assertLess(last.index("direction"), len(last) - 1 - last[::-1].index("barline"))
         self.assertTrue(all(len(b) for m in measures for b in m.findall("barline")))
+
+    def test_written_da_capo_and_dal_segno_carry_the_jump(self) -> None:
+        """A written D.S. jumps back to the segno before it and D.C. to the start; a second segno stays a sign."""
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+timeSignature_2/4 . . . .
+note_2 C5 _ _ upper
+barline . . . .
+segno . . . .
+note_2 D5 _ _ upper
+barline . . . .
+note_2 E5 _ _ upper
+daSegno . . . .
+barline . . . .
+note_2 F5 _ _ upper
+segno . . . .
+daCapo . . . .
+barline . . . .""".splitlines()
+        )
+        root = ET.fromstring(generate_xml(XmlGeneratorArguments(), [tokens], "").to_string())
+        sounds = [(m.get("number"), d.find("sound").attrib if d.find("sound") is not None else None)
+                  for m in root.findall("./part/measure") for d in m.findall("direction")]
+        self.assertEqual(sounds, [("2", {"segno": "segno1"}), ("3", {"dalsegno": "segno1"}),
+                                  ("4", {"segno": "segno2"}), ("4", {"dacapo": "yes"})])
 
     def test_first_ending_stops_at_its_backward_repeat(self) -> None:
         """When the end of a first ending's bracket was not read, the ending still stops at the backward repeat."""

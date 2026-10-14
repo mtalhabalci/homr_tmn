@@ -28,6 +28,7 @@ class ConversionState:
         self.volta_number = 1
         self.last_volta_measure = -10
         self.volta_open = False
+        self.segnos = 0
 
     def start_volta(self, measure_no: int) -> int:
         if measure_no == self.last_volta_measure + 1:
@@ -367,7 +368,7 @@ def build_measures(
                 barline = build_or_get_barline(measures[-1], "right")
                 build_barline_ending(symbol, barline, volta_number)
         elif rhythm in ("segno", "coda", "daCapo", "daSegno", "beatRepeat"):
-            build_direction(symbol, current_measure)
+            build_direction(symbol, current_measure, state)
         elif rhythm == "measureRepeat":
             if not repeat_shown:
                 _measure_repeat_style(current_measure, "start")
@@ -380,10 +381,17 @@ def build_measures(
     if _has_music(current_measure) or (current_measure.get_children() and not measures):
         close_current_measure()
     elif current_measure.get_children():
-        # Signs after the last barline (a coda, a fine) belong to the last measure, not to an empty one.
+        # Signs after the last barline (a coda, a fine) belong to the last measure, not to an empty one; they
+        # go in before its closing barline.
+        last = measures[-1]
+        closing = [b for b in last.get_children_of_type(mxl.XMLBarline) if b.location == "right"]
+        for barline in closing:
+            last.remove(barline)
         for child in list(current_measure.get_children()):
             current_measure.remove(child)
-            measures[-1].add_child(child)
+            last.add_child(child)
+        for barline in closing:
+            last.add_child(barline)
     if state.volta_open and measures:
         # the last ending runs to the end of the piece; an open last ending is drawn without a closing hook
         build_barline_ending(EncodedSymbol("voltaDiscontinue"), build_or_get_barline(measures[-1], "right"),
@@ -655,20 +663,32 @@ def build_time_signature(
     state.beats = beats
 
 
-def build_direction(symbol: EncodedSymbol, measure: mxl.XMLMeasure) -> None:
-    """A segno or coda sign, or the instruction that sends the player to one."""
+def build_direction(symbol: EncodedSymbol, measure: mxl.XMLMeasure, state: ConversionState) -> None:
+    """A segno or coda sign, or the instruction that sends the player to one. A written D.C. or D.S. also carries
+    the jump for playback; a D.S. goes back to the segno sign before it. A segno drawn a second time is left a
+    sign: whether it sends the player back, and where the return ends, is not on the staff."""
     direction = mxl.XMLDirection()
     direction_type = mxl.XMLDirectionType()
+    sound = None
     if symbol.rhythm == "segno":
         direction_type.add_child(mxl.XMLSegno())
+        state.segnos += 1
+        sound = mxl.XMLSound(segno=f"segno{state.segnos}")
     elif symbol.rhythm == "coda":
         direction_type.add_child(mxl.XMLCoda())
     elif symbol.rhythm == "beatRepeat":
         # How much of the measure the sign repeats is not in the token, so it stays an instruction.
         direction_type.add_child(mxl.XMLWords(value_="simile"))
+    elif symbol.rhythm == "daCapo":
+        direction_type.add_child(mxl.XMLWords(value_="D.C."))
+        sound = mxl.XMLSound(dacapo="yes")
     else:
-        direction_type.add_child(mxl.XMLWords(value_="D.C." if symbol.rhythm == "daCapo" else "D.S."))
+        direction_type.add_child(mxl.XMLWords(value_="D.S."))
+        if state.segnos:
+            sound = mxl.XMLSound(dalsegno=f"segno{state.segnos}")
     direction.add_child(direction_type)
+    if sound is not None:
+        direction.add_child(sound)
     measure.add_child(direction)
 
 
