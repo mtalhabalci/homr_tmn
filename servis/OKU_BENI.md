@@ -23,14 +23,21 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
 ## Uç noktalar
 
 - `POST /v1/omr` — multipart `dosya` (JPEG, PNG, WebP, PDF; en çok 20 MB), isteğe bağlı `tur` (`basili` |
-  `el_yazisi`; tek model ikisini de okur, yalnız geri yazılır). Yanıt: `musicxml`, `modelVersion`, `olcuGuven`
-  (`[{olcu, guven}]`, ölçü numaraları MusicXML'dekiyle aynı), `uyarilar`, `porteSayisi`, `sayfaSayisi`,
-  `sureMs`. `?kuyruk=1` ile iş kuyruğa alınır ve hemen `{"isId", "sayfaSayisi"}` döner (202). İşler yalnız
-  bellekte durur; servis yeniden başlarsa iş kaybolur (`GET` 404 döner, uygulama yeniden gönderir).
-- `GET /v1/omr/{isId}` — `{"durum": "isleniyor" | "tamam" | "hata", ...}`
+  `el_yazisi`; tek model ikisini de okur, yalnız geri yazılır) ve `sayfalar` (yalnız PDF: 1 tabanlı aralık listesi,
+  ör. `"1-3,5"`; boşsa bütün sayfalar; resimde yok sayılır). Yalnız seçilen sayfalar okunur; MusicXML yalnız onları
+  içerir ve ölçüler yine 1'den boşluksuz numaralanır. Yanıt: `musicxml`, `modelVersion`, `olcuGuven`
+  (`[{olcu, guven}]`, ölçü numaraları MusicXML'dekiyle aynı), `uyarilar`, `porteSayisi`, `sayfaSayisi` (okunan),
+  `toplamSayfa`, `sayfalar` (okunan sayfa numaraları), `sureMs`. `?kuyruk=1` ile iş kuyruğa alınır ve hemen
+  `{"isId", "sayfaSayisi", "toplamSayfa"}` döner (202). İşler yalnız bellekte durur; servis yeniden başlarsa iş
+  kaybolur (`GET` 404 döner, uygulama yeniden gönderir).
+- `GET /v1/omr/{isId}` — `{"durum": "isleniyor" | "tamam" | "hata" | "iptal", "islenenSayfa", "islenenPorte", ...}`;
+  ilerleme her sayfa bitince güncellenir.
+- `DELETE /v1/omr/{isId}` — süren iş bir sonraki porteden önce durur ve `durum: "iptal"` olarak kalır (202,
+  `{"isId", "durum": "iptal ediliyor"}`); bitmiş, hatalı ya da iptal edilmiş iş silinir (200, `"silindi"`); yoksa 404.
+- `POST /v1/sayfa-sayisi` — multipart `dosya` → `{"sayfaSayisi"}` (resim 1).
 - `GET /v1/saglik` — `{"modelVersion", "cihaz"}`
-- Hatalar: `{"hata", "mesaj"}`; 400 `gecersiz_tur` / `bos_dosya`, 401 `yetkisiz`, 413 `dosya_cok_buyuk`,
-  415 `desteklenmeyen_dosya`, 422 `porte_bulunamadi`, 500 `ic_hata`.
+- Hatalar: `{"hata", "mesaj"}`; 400 `gecersiz_tur` / `bos_dosya` / `gecersiz_sayfalar`, 401 `yetkisiz`, 413
+  `dosya_cok_buyuk`, 415 `desteklenmeyen_dosya`, 422 `porte_bulunamadi`, 500 `ic_hata`.
 
 ## Ölçü güveni
 

@@ -3,10 +3,14 @@
     python -m servis.nota_servisi                 listens on 127.0.0.1:OMR_PORT (default 8765)
 
     POST /v1/omr            multipart: dosya (JPEG, PNG, WebP or PDF, at most 20 MB), tur (basili | el_yazisi,
-                            optional; one model reads both, so it is only echoed back)
-                            ?kuyruk=1 queues the job and answers {"isId", "sayfaSayisi"} at once; jobs live
-                            in memory only, so a restart loses them (GET answers 404 and the app sends again)
-    GET  /v1/omr/{isId}     {"durum": "isleniyor" | "tamam" | "hata", ...}
+                            optional; one model reads both, so it is only echoed back), sayfalar (optional, PDF
+                            only: 1-based pages such as "1-3,5"; a bad range is 400 gecersiz_sayfalar)
+                            ?kuyruk=1 queues the job and answers {"isId", "sayfaSayisi", "toplamSayfa"} at once;
+                            jobs live in memory only, so a restart loses them (GET answers 404, the app sends again)
+    GET  /v1/omr/{isId}     {"durum": "isleniyor" | "tamam" | "hata" | "iptal", "islenenSayfa", "islenenPorte", ...}
+    DELETE /v1/omr/{isId}   a running job stops before its next staff and stays as durum "iptal" (202); a finished
+                            one is removed (200)
+    POST /v1/sayfa-sayisi   multipart dosya -> {"sayfaSayisi"}
     GET  /v1/saglik         {"modelVersion": ...}
 
 When OMR_ANAHTAR is set, the X-Omr-Anahtar header must equal it.
@@ -107,6 +111,25 @@ class ReadError(Exception):
         self.status, self.code, self.message = status, code, message
 
 
+class Cancelled(Exception):
+    """A queued reading stopped by DELETE /v1/omr/{isId}."""
+
+
+def parse_pages(spec: str | None, total: int) -> list[int]:
+    """'1-3,5' -> [1, 2, 3, 5]: 1-based, sorted, each page once. Empty means every page."""
+    if not spec or not spec.strip():
+        return list(range(1, total + 1))
+    chosen: set[int] = set()
+    for part in spec.replace(" ", "").split(","):
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
+        first, last = (int(match.group(1)), int(match.group(2) or match.group(1))) if match else (0, 0)
+        if not match or first < 1 or last < first or last > total:
+            raise ReadError(400, "gecersiz_sayfalar",
+                            f"Geçersiz sayfa aralığı: '{part}'. Biçim '1-3,5' gibi olmalı; dosyada {total} sayfa var.")
+        chosen.update(range(first, last + 1))
+    return sorted(chosen)
+
+
 class Reader:
     """The model, loaded once; one reading at a time, since the GPU holds a single copy."""
 
@@ -121,27 +144,32 @@ class Reader:
         self.processing = ProcessingConfig(False, False, False, False, -1,
                                            os.environ.get("OMR_GPU_SEGMENTASYON") == "1")
 
-    def _pages(self, path: str, scratch: str) -> list[str]:
+    def _page_image(self, path: str, scratch: str, page_no: int) -> str:
         if not path.endswith(".pdf"):
-            return [path]
-        images = []
+            return path
         with fitz.open(path) as document:
-            for page in document:
-                zoom = PAGE_WIDTH / page.rect.width
-                image = os.path.join(scratch, f"sayfa-{page.number + 1}.png")
-                page.get_pixmap(matrix=fitz.Matrix(zoom, zoom)).save(image)
-                images.append(image)
-        return images
+            page = document[page_no - 1]
+            zoom = PAGE_WIDTH / page.rect.width
+            image = os.path.join(scratch, f"sayfa-{page_no}.png")
+            page.get_pixmap(matrix=fitz.Matrix(zoom, zoom)).save(image)
+        return image
 
-    def read(self, path: str) -> dict:
+    def read(self, path: str, pages: list[int] | None = None, progress=None,
+             cancel: threading.Event | None = None) -> dict:
+        """Read the given 1-based pages of a PDF (all when None; an image is page 1). progress(pages_done, staffs)
+        is called after each page; cancel, when set, stops the reading before the next staff."""
         start = time.perf_counter()
         warnings: list[str] = []
         voice: list[EncodedSymbol] = []
         staffs = 0
+        total = page_count(path)
+        pages = pages or list(range(1, total + 1))
         with self.lock, tempfile.TemporaryDirectory() as scratch:
-            pages = self._pages(path, scratch)
-            for page_no, image in enumerate(pages, start=1):
-                where = f"{page_no}. sayfa" if len(pages) > 1 else "Sayfa"
+            for done, page_no in enumerate(pages):
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled
+                image = self._page_image(path, scratch, page_no)
+                where = f"{page_no}. sayfa" if total > 1 else "Sayfa"
                 try:
                     multi_staffs, preprocessed, debug, _ = detect_staffs_in_image(image, self.processing)
                 except Exception:  # noqa: BLE001
@@ -150,6 +178,8 @@ class Reader:
                 regions = StaffRegions(multi_staffs)
                 found = sorted((s for multi in multi_staffs for s in multi.staffs), key=lambda s: s.min_y)
                 for number, staff in enumerate(found):
+                    if cancel is not None and cancel.is_set():
+                        raise Cancelled
                     try:
                         cut, _ = prepare_staff_image(debug, number, staff, preprocessed, regions)
                     except cv2.error:
@@ -161,6 +191,8 @@ class Reader:
                         symbols = self.model.generate(tensor.unsqueeze(0))
                     voice += [s for s in symbols if not s.is_control_symbol()] + [EncodedSymbol("newline")]
                     staffs += 1
+                if progress is not None:
+                    progress(done + 1, staffs)
             if not staffs:
                 raise ReadError(422, "porte_bulunamadi",
                                 "Görüntüde okunabilir porte bulunamadı. Sayfanın tamamı, düz ve net çekilmiş "
@@ -180,12 +212,14 @@ class Reader:
         if off:
             warnings.append(f"Ölçü {', '.join(map(str, off))}: süreler ölçü işaretini tutmuyor; kontrol edilmeli.")
         return {"musicxml": musicxml, "modelVersion": MODEL_VERSION, "olcuGuven": measures, "uyarilar": warnings,
-                "porteSayisi": staffs, "sayfaSayisi": len(pages), "sureMs": round((time.perf_counter() - start) * 1000)}
+                "porteSayisi": staffs, "sayfaSayisi": len(pages), "toplamSayfa": total, "sayfalar": pages,
+                "sureMs": round((time.perf_counter() - start) * 1000)}
 
 
 app = FastAPI(title="Nota okuma servisi", docs_url=None, redoc_url=None, openapi_url=None)
 reader: Reader | None = None
 jobs: dict[str, dict] = {}
+cancels: dict[str, threading.Event] = {}
 
 
 def _reader() -> Reader:
@@ -209,12 +243,46 @@ def health() -> dict:
     return {"modelVersion": MODEL_VERSION, "cihaz": str(_reader().device)}
 
 
-def _run(path: str, kind: str | None) -> dict:
+def _run(path: str, kind: str | None, pages: list[int], progress=None, cancel=None) -> dict:
     try:
-        result = _reader().read(path)
+        result = _reader().read(path, pages, progress, cancel)
         if kind:
             result["tur"] = kind
         return result
+    finally:
+        os.remove(path)
+
+
+async def _upload(dosya: UploadFile) -> tuple[str, JSONResponse | None]:
+    """Check and store an upload; returns its temporary path, or an error response."""
+    suffix = TYPES.get((dosya.content_type or "").lower())
+    if suffix is None:
+        return "", _error(415, "desteklenmeyen_dosya", "Yalnız JPEG, PNG, WebP ya da PDF yüklenebilir.")
+    data = await dosya.read()
+    if len(data) > MAX_BYTES:
+        return "", _error(413, "dosya_cok_buyuk", "Dosya 20 MB'tan büyük olamaz.")
+    if not data:
+        return "", _error(400, "bos_dosya", "Dosya boş.")
+    handle, path = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(handle, "wb") as target:
+        target.write(data)
+    try:
+        page_count(path)
+    except Exception:  # noqa: BLE001
+        os.remove(path)
+        return "", _error(415, "desteklenmeyen_dosya", "PDF açılamadı.")
+    return path, None
+
+
+@app.post("/v1/sayfa-sayisi")
+async def count_pages(dosya: UploadFile = File(...), x_omr_anahtar: str | None = Header(None)) -> JSONResponse:
+    if KEY and x_omr_anahtar != KEY:
+        return _error(401, "yetkisiz", "Geçersiz ya da eksik X-Omr-Anahtar.")
+    path, error = await _upload(dosya)
+    if error is not None:
+        return error
+    try:
+        return JSONResponse(content={"sayfaSayisi": page_count(path)})
     finally:
         os.remove(path)
 
@@ -223,6 +291,7 @@ def _run(path: str, kind: str | None) -> dict:
 async def read_score(
     dosya: UploadFile = File(...),
     tur: str | None = Form(None),
+    sayfalar: str | None = Form(None),
     kuyruk: int = 0,
     x_omr_anahtar: str | None = Header(None),
 ) -> JSONResponse:
@@ -230,48 +299,51 @@ async def read_score(
         return _error(401, "yetkisiz", "Geçersiz ya da eksik X-Omr-Anahtar.")
     if tur not in (None, "", "basili", "el_yazisi"):
         return _error(400, "gecersiz_tur", "tur yalnız 'basili' ya da 'el_yazisi' olabilir.")
-    suffix = TYPES.get((dosya.content_type or "").lower())
-    if suffix is None:
-        return _error(415, "desteklenmeyen_dosya", "Yalnız JPEG, PNG, WebP ya da PDF yüklenebilir.")
-    data = await dosya.read()
-    if len(data) > MAX_BYTES:
-        return _error(413, "dosya_cok_buyuk", "Dosya 20 MB'tan büyük olamaz.")
-    if not data:
-        return _error(400, "bos_dosya", "Dosya boş.")
-    handle, path = tempfile.mkstemp(suffix=suffix)
-    with os.fdopen(handle, "wb") as target:
-        target.write(data)
+    path, error = await _upload(dosya)
+    if error is not None:
+        return error
+    total = page_count(path)
+    try:
+        # a page range applies to PDFs only; an image is one page whatever is asked
+        pages = parse_pages(sayfalar, total) if path.endswith(".pdf") else [1]
+    except ReadError as error:
+        os.remove(path)
+        return _error(error.status, error.code, error.message)
     if kuyruk:
-        try:
-            pages = page_count(path)
-        except Exception:  # noqa: BLE001
-            os.remove(path)
-            return _error(415, "desteklenmeyen_dosya", "PDF açılamadı.")
         job = uuid.uuid4().hex
-        jobs[job] = {"durum": "isleniyor", "sayfaSayisi": pages}
+        jobs[job] = {"durum": "isleniyor", "sayfaSayisi": len(pages), "toplamSayfa": total, "islenenSayfa": 0,
+                     "islenenPorte": 0}
+        cancels[job] = threading.Event()
+
+        def progress(pages_done: int, staffs: int) -> None:
+            jobs[job].update(islenenSayfa=pages_done, islenenPorte=staffs)
 
         def work() -> None:
             try:
-                jobs[job] = {"durum": "tamam", **_run(path, tur)}
+                jobs[job] = {"durum": "tamam", **_run(path, tur, pages, progress, cancels[job])}
+            except Cancelled:
+                jobs[job] = {**jobs[job], "durum": "iptal"}
             except ReadError as error:
                 jobs[job] = {"durum": "hata", "hata": error.code, "mesaj": error.message}
             except Exception:  # noqa: BLE001
                 jobs[job] = {"durum": "hata", "hata": "ic_hata", "mesaj": "Okuma sırasında beklenmeyen bir hata oluştu."}
+            finally:
+                cancels.pop(job, None)
 
         threading.Thread(target=work, daemon=True).start()
-        return JSONResponse(status_code=202, content={"isId": job, "sayfaSayisi": pages})
+        return JSONResponse(status_code=202, content={"isId": job, "sayfaSayisi": len(pages), "toplamSayfa": total})
     try:
-        return JSONResponse(content=await _in_thread(path, tur))
+        return JSONResponse(content=await _in_thread(path, tur, pages))
     except ReadError as error:
         return _error(error.status, error.code, error.message)
     except Exception:  # noqa: BLE001
         return _error(500, "ic_hata", "Okuma sırasında beklenmeyen bir hata oluştu.")
 
 
-async def _in_thread(path: str, kind: str | None) -> dict:
+async def _in_thread(path: str, kind: str | None, pages: list[int]) -> dict:
     from starlette.concurrency import run_in_threadpool  # noqa: PLC0415
 
-    return await run_in_threadpool(_run, path, kind)
+    return await run_in_threadpool(_run, path, kind, pages)
 
 
 @app.get("/v1/omr/{job}")
@@ -281,6 +353,21 @@ def job_status(job: str, x_omr_anahtar: str | None = Header(None)) -> JSONRespon
     if job not in jobs:
         return _error(404, "is_bulunamadi", "Böyle bir iş yok.")
     return JSONResponse(content=jobs[job])
+
+
+@app.delete("/v1/omr/{job}")
+def cancel_job(job: str, x_omr_anahtar: str | None = Header(None)) -> JSONResponse:
+    """A running job stops before its next staff and is kept as durum "iptal" (202); a finished, failed or cancelled
+    job is removed (200)."""
+    if KEY and x_omr_anahtar != KEY:
+        return _error(401, "yetkisiz", "Geçersiz ya da eksik X-Omr-Anahtar.")
+    if job not in jobs:
+        return _error(404, "is_bulunamadi", "Böyle bir iş yok.")
+    if job in cancels:
+        cancels[job].set()
+        return JSONResponse(status_code=202, content={"isId": job, "durum": "iptal ediliyor"})
+    jobs.pop(job)
+    return JSONResponse(content={"isId": job, "durum": "silindi"})
 
 
 if __name__ == "__main__":
