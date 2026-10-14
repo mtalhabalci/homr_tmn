@@ -1700,9 +1700,7 @@
           <line>2</line>
         </clef>
       </attributes>
-    </measure>
-    <measure number="20">
-      <barline location="right">
+      <barline location="left">
         <repeat direction="forward" />
       </barline>
       <note>
@@ -1805,7 +1803,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="21">
+    <measure number="20">
       <note>
         <pitch>
           <step>C</step>
@@ -1907,7 +1905,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="22">
+    <measure number="21">
       <note>
         <pitch>
           <step>G</step>
@@ -2010,7 +2008,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="23">
+    <measure number="22">
       <print new-system="yes" />
       <attributes>
         <key>
@@ -2098,9 +2096,9 @@
         <repeat direction="backward" />
       </barline>
     </measure>
-    <measure number="24">
+    <measure number="23">
       <barline location="left">
-        <ending type="start" number="1" />
+        <ending type="start" number="2" />
       </barline>
       <note>
         <pitch>
@@ -2178,6 +2176,7 @@
       </note>
       <barline location="right">
         <bar-style>heavy-heavy</bar-style>
+        <ending type="discontinue" number="2" />
       </barline>
     </measure>
   </part>

@@ -445,9 +445,7 @@
           <line>2</line>
         </clef>
       </attributes>
-    </measure>
-    <measure number="7">
-      <barline location="right">
+      <barline location="left">
         <repeat direction="forward" />
       </barline>
       <note>
@@ -506,7 +504,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="8">
+    <measure number="7">
       <note>
         <pitch>
           <step>B</step>
@@ -659,7 +657,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="9">
+    <measure number="8">
       <note>
         <pitch>
           <step>D</step>
@@ -727,7 +725,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="10">
+    <measure number="9">
       <note>
         <rest />
         <duration>12</duration>
@@ -830,7 +828,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="11">
+    <measure number="10">
       <note>
         <pitch>
           <step>A</step>
@@ -866,7 +864,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="12">
+    <measure number="11">
       <print new-system="yes" />
       <attributes>
         <key>
@@ -935,7 +933,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="13">
+    <measure number="12">
       <note>
         <rest />
         <duration>12</duration>
@@ -989,7 +987,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="14">
+    <measure number="13">
       <note>
         <pitch>
           <step>F</step>
@@ -1091,10 +1089,11 @@
         <notations />
       </note>
       <barline location="right">
+        <ending type="stop" number="1" />
         <repeat direction="backward" />
       </barline>
     </measure>
-    <measure number="15">
+    <measure number="14">
       <print new-system="yes" />
       <attributes>
         <key>
@@ -1161,7 +1160,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="16">
+    <measure number="15">
       <note>
         <rest />
         <duration>12</duration>
@@ -1215,7 +1214,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="17">
+    <measure number="16">
       <note>
         <pitch>
           <step>F</step>
@@ -1292,7 +1291,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="18">
+    <measure number="17">
       <print new-system="yes" />
       <attributes>
         <key>
@@ -1455,7 +1454,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="19">
+    <measure number="18">
       <note>
         <pitch>
           <step>B</step>
@@ -1527,7 +1526,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="20">
+    <measure number="19">
       <note>
         <rest />
         <duration>12</duration>
@@ -1606,7 +1605,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="21">
+    <measure number="20">
       <note>
         <pitch>
           <step>D</step>
@@ -1712,7 +1711,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="22">
+    <measure number="21">
       <note>
         <pitch>
           <step>A</step>
@@ -1770,7 +1769,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="23">
+    <measure number="22">
       <print new-system="yes" />
       <attributes>
         <key>
@@ -1837,7 +1836,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="24">
+    <measure number="23">
       <note>
         <rest />
         <duration>12</duration>
@@ -1891,7 +1890,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="25">
+    <measure number="24">
       <note>
         <pitch>
           <step>A</step>
@@ -1947,7 +1946,7 @@
         <bar-style>light-light</bar-style>
       </barline>
     </measure>
-    <measure number="26">
+    <measure number="25">
       <print new-system="yes" />
       <attributes>
         <key>
@@ -2013,7 +2012,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="27">
+    <measure number="26">
       <note>
         <rest />
         <duration>12</duration>
@@ -2068,7 +2067,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="28">
+    <measure number="27">
       <note>
         <rest />
         <duration>12</duration>
@@ -2113,6 +2112,93 @@
       <note>
         <pitch>
           <step>G</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>24</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+    </measure>
+    <measure number="28">
+      <note>
+        <rest />
+        <duration>12</duration>
+        <voice>1</voice>
+        <type>eighth</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+      <note>
+        <pitch>
+          <step>A</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>24</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+      <note>
+        <pitch>
+          <step>F</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>12</duration>
+        <voice>1</voice>
+        <type>eighth</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+      <note>
+        <pitch>
+          <step>E</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>6</duration>
+        <voice>1</voice>
+        <type>16th</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+      <note>
+        <pitch>
+          <step>F</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>6</duration>
+        <voice>1</voice>
+        <type>16th</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+      <note>
+        <pitch>
+          <step>G</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>6</duration>
+        <voice>1</voice>
+        <type>16th</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+      <note>
+        <pitch>
+          <step>E</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>6</duration>
+        <voice>1</voice>
+        <type>16th</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+      <note>
+        <pitch>
+          <step>F</step>
           <octave>5</octave>
         </pitch>
         <duration>24</duration>
@@ -2136,9 +2222,20 @@
           <step>A</step>
           <octave>5</octave>
         </pitch>
-        <duration>24</duration>
+        <duration>12</duration>
         <voice>1</voice>
-        <type>quarter</type>
+        <type>eighth</type>
+        <staff>1</staff>
+        <notations />
+      </note>
+      <note>
+        <pitch>
+          <step>G</step>
+          <octave>5</octave>
+        </pitch>
+        <duration>12</duration>
+        <voice>1</voice>
+        <type>eighth</type>
         <staff>1</staff>
         <notations />
       </note>
@@ -2158,20 +2255,9 @@
           <step>E</step>
           <octave>5</octave>
         </pitch>
-        <duration>6</duration>
+        <duration>12</duration>
         <voice>1</voice>
-        <type>16th</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-      <note>
-        <pitch>
-          <step>F</step>
-          <octave>5</octave>
-        </pitch>
-        <duration>6</duration>
-        <voice>1</voice>
-        <type>16th</type>
+        <type>eighth</type>
         <staff>1</staff>
         <notations />
       </note>
@@ -2188,7 +2274,7 @@
       </note>
       <note>
         <pitch>
-          <step>E</step>
+          <step>F</step>
           <octave>5</octave>
         </pitch>
         <duration>6</duration>
@@ -2210,93 +2296,6 @@
       </note>
     </measure>
     <measure number="30">
-      <note>
-        <rest />
-        <duration>12</duration>
-        <voice>1</voice>
-        <type>eighth</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-      <note>
-        <pitch>
-          <step>A</step>
-          <octave>5</octave>
-        </pitch>
-        <duration>12</duration>
-        <voice>1</voice>
-        <type>eighth</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-      <note>
-        <pitch>
-          <step>G</step>
-          <octave>5</octave>
-        </pitch>
-        <duration>12</duration>
-        <voice>1</voice>
-        <type>eighth</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-      <note>
-        <pitch>
-          <step>F</step>
-          <octave>5</octave>
-        </pitch>
-        <duration>12</duration>
-        <voice>1</voice>
-        <type>eighth</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-      <note>
-        <pitch>
-          <step>E</step>
-          <octave>5</octave>
-        </pitch>
-        <duration>12</duration>
-        <voice>1</voice>
-        <type>eighth</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-      <note>
-        <pitch>
-          <step>G</step>
-          <octave>5</octave>
-        </pitch>
-        <duration>6</duration>
-        <voice>1</voice>
-        <type>16th</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-      <note>
-        <pitch>
-          <step>F</step>
-          <octave>5</octave>
-        </pitch>
-        <duration>6</duration>
-        <voice>1</voice>
-        <type>16th</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-      <note>
-        <pitch>
-          <step>F</step>
-          <octave>5</octave>
-        </pitch>
-        <duration>24</duration>
-        <voice>1</voice>
-        <type>quarter</type>
-        <staff>1</staff>
-        <notations />
-      </note>
-    </measure>
-    <measure number="31">
       <print new-system="yes" />
       <attributes>
         <key>
@@ -2366,7 +2365,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="32">
+    <measure number="31">
       <note>
         <rest />
         <duration>12</duration>
@@ -2420,7 +2419,7 @@
         <notations />
       </note>
     </measure>
-    <measure number="33">
+    <measure number="32">
       <note>
         <pitch>
           <step>F</step>
@@ -2498,9 +2497,8 @@
       </note>
       <barline location="right">
         <bar-style>light-light</bar-style>
+        <ending type="discontinue" number="1" />
       </barline>
-    </measure>
-    <measure number="34">
       <direction>
         <direction-type>
           <segno />

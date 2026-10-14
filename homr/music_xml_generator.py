@@ -27,16 +27,19 @@ class ConversionState:
         self.tremolo_state = "stop"
         self.volta_number = 1
         self.last_volta_measure = -10
+        self.volta_open = False
 
     def start_volta(self, measure_no: int) -> int:
         if measure_no == self.last_volta_measure + 1:
             self.volta_number += 1
         else:
             self.volta_number = 1
+        self.volta_open = True
         return self.volta_number
 
     def stop_volta(self, measure_no: int) -> int:
         self.last_volta_measure = measure_no
+        self.volta_open = False
         return self.volta_number
 
     def toggle_tremolo_state(self) -> str:
@@ -199,6 +202,9 @@ def build_measures(
 ) -> list[mxl.XMLMeasure]:
     def close_current_measure() -> None:
         rebalance_measure_voices(current_measure)
+        for barline in current_measure.get_children_of_type(mxl.XMLBarline):
+            if not barline.get_children():
+                current_measure.remove(barline)
         measures.append(current_measure)
         played_before[:] = played_now
         played_now.clear()
@@ -216,6 +222,22 @@ def build_measures(
             for note_xml in build_note_chord(staff_pos, state, chord_duration):
                 current_measure.add_child(note_xml)
         played_now.append(group)
+
+    def end_repeat() -> None:
+        """A backward repeat on the barline that closes this measure, or on the one that already closed the
+        measure before (a plain barline came first). A first ending always ends at the backward repeat, so an
+        ending still open there (its bracket end was not read) stops on the same barline."""
+        nonlocal current_measure, measure_number
+        closes = _has_music(current_measure) or not measures
+        barline = build_or_get_barline(current_measure if closes else measures[-1], "right")
+        build_repeat(EncodedSymbol("repeatEnd"), barline)
+        if state.volta_open:
+            ended = measure_number if closes else measure_number - 1
+            build_barline_ending(EncodedSymbol("voltaStop"), barline, state.stop_volta(ended))
+        if closes:
+            close_current_measure()
+            measure_number += 1
+            current_measure = mxl.XMLMeasure(number=str(measure_number))
 
     # The note groups of this measure and the one before: a measure-repeat sign plays the one
     # before again, so its notes are written out once more (the musicxml elements cannot be copied).
@@ -289,6 +311,13 @@ def build_measures(
             attributes = build_or_get_attributes(current_measure, last_attributes)
             build_time_signature(symbol, attributes, state)
         elif "barline" in rhythm:
+            if not _has_music(current_measure) and measures:
+                # Nothing was played since the measure before closed (a repeat closed it, or a new staff
+                # began), so this barline closes nothing: no empty measure is written. A drawn style
+                # still belongs to the barline that closed that measure.
+                if rhythm != "barline":
+                    build_barline_style(symbol, build_or_get_barline(measures[-1], "right"))
+                continue
             if rhythm != "barline":
                 # Standard barlines don't need extra handling
                 barline = build_or_get_barline(current_measure, "right")
@@ -298,47 +327,43 @@ def build_measures(
             measure_number += 1
             current_measure = mxl.XMLMeasure(number=str(measure_number))
         elif rhythm == "repeatStart":
-            close_current_measure()
-            measure_number += 1
-            current_measure = mxl.XMLMeasure(number=str(measure_number))
+            # A forward repeat stands at the left of the measure it opens. Right after a barline, or at
+            # the start of a staff, that measure is already open and holds no notes yet.
+            if _has_music(current_measure):
+                close_current_measure()
+                measure_number += 1
+                current_measure = mxl.XMLMeasure(number=str(measure_number))
 
-            barline = build_or_get_barline(current_measure, "right")
+            barline = build_or_get_barline(current_measure, "left")
             build_repeat(symbol, barline)
         elif rhythm == "repeatEnd":
-            barline = build_or_get_barline(current_measure, "right")
-            build_repeat(symbol, barline)
-
-            close_current_measure()
-            measure_number += 1
-            current_measure = mxl.XMLMeasure(number=str(measure_number))
+            end_repeat()
         elif rhythm == "repeatEndStart":
-            barline = build_or_get_barline(current_measure, "right")
-            build_repeat(EncodedSymbol("repeatEnd"), barline)
-
-            close_current_measure()
-            measure_number += 1
-            current_measure = mxl.XMLMeasure(number=str(measure_number))
-            barline = build_or_get_barline(current_measure, "right")
+            end_repeat()
+            barline = build_or_get_barline(current_measure, "left")
             build_repeat(EncodedSymbol("repeatStart"), barline)
         elif rhythm.startswith("voltaStart"):
             volta_number = state.start_volta(measure_number)
             barline = build_or_get_barline(current_measure, "left")
             build_barline_ending(symbol, barline, volta_number)
         elif rhythm.startswith(("voltaStop", "voltaDiscontinue")):
-            volta_number = state.stop_volta(measure_number)
             # Two conventions meet here. A MusicXML source names the barline and
             # then the ending on it, so by now the measure has already closed and
             # the ending belongs to the one before. A Mus2 score draws the ending
             # bracket as the barline, so nothing has closed yet and this symbol
             # is what closes it -- without that, the next ending landed in the
-            # same measure and MusicXML allows a barline only one.
-            if current_measure.get_children():
+            # same measure and MusicXML allows a barline only one. The ending is
+            # numbered by the measure it ends on, so that a second ending opening
+            # in the next measure counts as the second.
+            if _has_music(current_measure):
+                volta_number = state.stop_volta(measure_number)
                 barline = build_or_get_barline(current_measure, "right")
                 build_barline_ending(symbol, barline, volta_number)
                 close_current_measure()
                 measure_number += 1
                 current_measure = mxl.XMLMeasure(number=str(measure_number))
             elif measures:
+                volta_number = state.stop_volta(measure_number - 1)
                 barline = build_or_get_barline(measures[-1], "right")
                 build_barline_ending(symbol, barline, volta_number)
         elif rhythm in ("segno", "coda", "daCapo", "daSegno", "beatRepeat"):
@@ -352,9 +377,28 @@ def build_measures(
         else:
             eprint("Symbol isn't supported yet ", symbol)
 
-    if len(current_measure.get_children()) > 0:
+    if _has_music(current_measure) or (current_measure.get_children() and not measures):
         close_current_measure()
+    elif current_measure.get_children():
+        # Signs after the last barline (a coda, a fine) belong to the last measure, not to an empty one.
+        for child in list(current_measure.get_children()):
+            current_measure.remove(child)
+            measures[-1].add_child(child)
+    if state.volta_open and measures:
+        # the last ending runs to the end of the piece; an open last ending is drawn without a closing hook
+        build_barline_ending(EncodedSymbol("voltaDiscontinue"), build_or_get_barline(measures[-1], "right"),
+                             state.stop_volta(len(measures)))
     return measures
+
+
+def _has_music(measure: mxl.XMLMeasure) -> bool:
+    """Notes or rests, or a multi-measure rest, which is written as a measure style alone."""
+    if measure.get_children_of_type(mxl.XMLNote):
+        return True
+    return any(
+        attributes.get_children_of_type(mxl.XMLMeasureStyle)
+        for attributes in measure.get_children_of_type(mxl.XMLAttributes)
+    )
 
 
 def build_work(title_text: str) -> mxl.XMLWork:
@@ -629,6 +673,8 @@ def build_direction(symbol: EncodedSymbol, measure: mxl.XMLMeasure) -> None:
 
 
 def build_barline_style(barline: EncodedSymbol, xml: mxl.XMLBarline) -> None:
+    if xml.get_children_of_type(mxl.XMLBarStyle):
+        return
     if barline.rhythm == "dashedbarline":
         xml.add_child(mxl.XMLBarStyle(value_="dashed"))
         return
@@ -707,13 +753,17 @@ LIFT_TO_ACCIDENTAL = {
 
 # The same glyphs by their SMuFL names, written as the smufl attribute of <accidental> and <key-accidental>
 # so a reader need not guess between MusicXML names that two systems share (a plain flat is 5 commas in
-# AEU). The 2- and 3-comma signs have no SMuFL glyph and go without.
+# AEU). The 2- and 3-comma signs are SMuFL's Turkish folk music accidentals (U+E451, U+E452, U+E455, U+E456).
 LIFT_TO_SMUFL = {
     "sharp1": "accidentalKomaSharp",
+    "sharp2": "accidental2CommaSharp",
+    "sharp3": "accidental3CommaSharp",
     "sharp4": "accidentalBakiyeSharp",
     "sharp5": "accidentalKucukMucennebSharp",
     "sharp8": "accidentalBuyukMucennebSharp",
     "flat1": "accidentalKomaFlat",
+    "flat2": "accidental2CommaFlat",
+    "flat3": "accidental3CommaFlat",
     "flat4": "accidentalBakiyeFlat",
     "flat5": "accidentalKucukMucennebFlat",
     "flat8": "accidentalBuyukMucennebFlat",

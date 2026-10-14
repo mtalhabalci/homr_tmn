@@ -7,103 +7,92 @@
   },
   {
    "olcu": 2,
-   "guven": 0.856
+   "guven": 0.898
   },
   {
    "olcu": 3,
-   "guven": 0.898
-  },
-  {
-   "olcu": 4,
    "guven": 0.887
   },
   {
-   "olcu": 5,
+   "olcu": 4,
    "guven": 0.656
   },
   {
-   "olcu": 6,
+   "olcu": 5,
    "guven": 0.666
   },
   {
-   "olcu": 7,
+   "olcu": 6,
    "guven": 0.896
+  },
+  {
+   "olcu": 7,
+   "guven": 0.899
   },
   {
    "olcu": 8,
-   "guven": 0.899
-  },
-  {
-   "olcu": 9,
    "guven": 0.881
   },
   {
-   "olcu": 10,
+   "olcu": 9,
    "guven": 0.899
   },
   {
-   "olcu": 11,
-   "guven": 0.896
-  },
-  {
-   "olcu": 12,
+   "olcu": 10,
    "guven": 0.86
   },
   {
-   "olcu": 13,
+   "olcu": 11,
    "guven": 0.901
   },
   {
-   "olcu": 14,
+   "olcu": 12,
    "guven": 0.893
   },
   {
+   "olcu": 13,
+   "guven": 0.665
+  },
+  {
+   "olcu": 14,
+   "guven": 0.665
+  },
+  {
    "olcu": 15,
-   "guven": 0.665
-  },
-  {
-   "olcu": 16,
-   "guven": 0.665
-  },
-  {
-   "olcu": 17,
    "guven": 0.897
   },
   {
-   "olcu": 18,
+   "olcu": 16,
    "guven": 0.9
   },
   {
-   "olcu": 19,
+   "olcu": 17,
    "guven": 0.896
   },
   {
-   "olcu": 20,
+   "olcu": 18,
    "guven": 0.898
+  },
+  {
+   "olcu": 19,
+   "guven": 0.9
+  },
+  {
+   "olcu": 20,
+   "guven": 0.9
   },
   {
    "olcu": 21,
-   "guven": 0.9
-  },
-  {
-   "olcu": 22,
-   "guven": 0.9
-  },
-  {
-   "olcu": 23,
    "guven": 0.849
   },
   {
-   "olcu": 24,
+   "olcu": 22,
    "guven": 0.898
-  },
-  {
-   "olcu": 25,
-   "guven": 0.908
   }
  ],
  "uyarilar": [],
  "porteSayisi": 16,
- "sureMs": 13624,
+ "sayfaSayisi": 2,
+ "sureMs": 14356,
  "kaynak": "datasets/SymbTr-2.0.0/pdf/hicaz--sarki--agiraksak--firkatin_aldi--bimen_sen.pdf"
 }

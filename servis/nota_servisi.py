@@ -4,7 +4,8 @@
 
     POST /v1/omr            multipart: dosya (JPEG, PNG, WebP or PDF, at most 20 MB), tur (basili | el_yazisi,
                             optional; one model reads both, so it is only echoed back)
-                            ?kuyruk=1 queues the job and answers {"isId"} at once
+                            ?kuyruk=1 queues the job and answers {"isId", "sayfaSayisi"} at once; jobs live
+                            in memory only, so a restart loses them (GET answers 404 and the app sends again)
     GET  /v1/omr/{isId}     {"durum": "isleniyor" | "tamam" | "hata", ...}
     GET  /v1/saglik         {"modelVersion": ...}
 
@@ -25,7 +26,9 @@ import tempfile
 import threading
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from concurrent.futures import Future
+from fractions import Fraction
 
 import cv2
 import fitz
@@ -60,6 +63,42 @@ def _no_title(*_: object) -> Future:
     done: Future = Future()
     done.set_result("")
     return done
+
+
+def page_count(path: str) -> int:
+    if not path.endswith(".pdf"):
+        return 1
+    with fitz.open(path) as document:
+        return document.page_count
+
+
+def measures_off_meter(musicxml: str) -> list[int]:
+    """Measures whose notes and rests do not add up to the time signature: a duration was misread. The first and
+    last measure may be short (an upbeat and the measure that completes it), so they count only when too long."""
+    root = ET.fromstring(musicxml)
+    measures = root.findall("./part/measure")
+    divisions, meter, off = 1, None, []
+    for index, measure in enumerate(measures):
+        for attributes in measure.findall("attributes"):
+            divisions = int(attributes.findtext("divisions") or divisions)
+            time_signature = attributes.find("time")
+            if time_signature is not None:
+                try:
+                    meter = Fraction(int(time_signature.findtext("beats")), int(time_signature.findtext("beat-type")))
+                except (TypeError, ValueError):
+                    meter = None
+        if meter is None or measure.find("attributes/measure-style/multiple-rest") is not None:
+            continue
+        voices: dict[str, int] = {}
+        for note in measure.findall("note"):
+            if note.find("chord") is None and note.find("grace") is None:
+                voice = note.findtext("voice") or "1"
+                voices[voice] = voices.get(voice, 0) + int(note.findtext("duration") or 0)
+        length = Fraction(max(voices.values(), default=0), divisions * 4)
+        edge = index in (0, len(measures) - 1)
+        if length > meter or (length < meter and not edge):
+            off.append(int(measure.get("number")))
+    return off
 
 
 class ReadError(Exception):
@@ -137,8 +176,11 @@ class Reader:
         weak = sum(1 for m in measures if m["guven"] < LOW_CONFIDENCE)
         if weak:
             warnings.append(f"{weak} ölçüde okuma güveni düşük; bu ölçüler kontrol edilmeli.")
+        off = measures_off_meter(musicxml)
+        if off:
+            warnings.append(f"Ölçü {', '.join(map(str, off))}: süreler ölçü işaretini tutmuyor; kontrol edilmeli.")
         return {"musicxml": musicxml, "modelVersion": MODEL_VERSION, "olcuGuven": measures, "uyarilar": warnings,
-                "porteSayisi": staffs, "sureMs": round((time.perf_counter() - start) * 1000)}
+                "porteSayisi": staffs, "sayfaSayisi": len(pages), "sureMs": round((time.perf_counter() - start) * 1000)}
 
 
 app = FastAPI(title="Nota okuma servisi", docs_url=None, redoc_url=None, openapi_url=None)
@@ -200,8 +242,13 @@ async def read_score(
     with os.fdopen(handle, "wb") as target:
         target.write(data)
     if kuyruk:
+        try:
+            pages = page_count(path)
+        except Exception:  # noqa: BLE001
+            os.remove(path)
+            return _error(415, "desteklenmeyen_dosya", "PDF açılamadı.")
         job = uuid.uuid4().hex
-        jobs[job] = {"durum": "isleniyor"}
+        jobs[job] = {"durum": "isleniyor", "sayfaSayisi": pages}
 
         def work() -> None:
             try:
@@ -212,7 +259,7 @@ async def read_score(
                 jobs[job] = {"durum": "hata", "hata": "ic_hata", "mesaj": "Okuma sırasında beklenmeyen bir hata oluştu."}
 
         threading.Thread(target=work, daemon=True).start()
-        return JSONResponse(status_code=202, content={"isId": job})
+        return JSONResponse(status_code=202, content={"isId": job, "sayfaSayisi": pages})
     try:
         return JSONResponse(content=await _in_thread(path, tur))
     except ReadError as error:

@@ -2,6 +2,7 @@
 
 import re
 import unittest
+import xml.etree.ElementTree as ET
 from typing import Any
 
 import musicxml.xmlelement.xmlelement as mxl
@@ -232,11 +233,11 @@ note_4 E5 sharp3 _ upper
 barline . . . .""".splitlines()
         )
         xml = generate_xml(XmlGeneratorArguments(), [tokens], "").to_string()
-        self.assertIn("<key-accidental>flat-2</key-accidental>", xml)
-        # a sign with a SMuFL glyph names it too; the THM numbered signs have none
+        self.assertIn('<key-accidental smufl="accidental2CommaFlat">flat-2</key-accidental>', xml)
+        # each sign names its SMuFL glyph too, the THM numbered ones from the Turkish folk music range
         self.assertIn('<accidental smufl="accidentalNatural">natural</accidental>', xml)
         self.assertIn('<accidental smufl="accidentalDoubleSharp">double-sharp</accidental>', xml)
-        self.assertIn("<accidental>sharp-3</accidental>", xml)
+        self.assertIn('<accidental smufl="accidental3CommaSharp">sharp-3</accidental>', xml)
         # a tie both drawn and sounding
         self.assertIn('<tie type="start"', xml)
         self.assertIn('<tie type="stop"', xml)
@@ -249,12 +250,17 @@ keyAccidental B4 flat1 _ upper
 timeSignature_2/4 . . . .
 note_4 C5 sharp4 _ upper
 note_4 F5 sharp5 _ upper
+barline . . . .
+note_4 E5 flat2 _ upper
+note_4 G5 sharp3 _ upper
 barline . . . .""".splitlines()
         )
         xml = generate_xml(XmlGeneratorArguments(), [tokens], "").to_string()
         self.assertIn('<key-accidental smufl="accidentalKomaFlat">quarter-flat</key-accidental>', xml)
         self.assertIn('<accidental smufl="accidentalBakiyeSharp">sharp</accidental>', xml)
         self.assertIn('<accidental smufl="accidentalKucukMucennebSharp">slash-quarter-sharp</accidental>', xml)
+        self.assertIn('<accidental smufl="accidental2CommaFlat">flat-2</accidental>', xml)
+        self.assertIn('<accidental smufl="accidental3CommaSharp">sharp-3</accidental>', xml)
 
     def test_software_name_and_measure_confidence(self) -> None:
         """An application names itself in <software>; the lowest confidence of each measure is collected."""
@@ -275,6 +281,63 @@ barline . . . .""".splitlines()
         self.assertIn("<software>Uygulama</software>", xml)
         self.assertNotIn("homr", xml)
         self.assertEqual(confidence, {1: 0.4, 2: 0.8})
+
+    def test_repeats_and_endings_without_empty_measures(self) -> None:
+        """A forward repeat opens its measure on the left, the second ending is numbered 2, and a repeat or a
+        closing sign that follows a barline makes no measure of its own."""
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+timeSignature_2/4 . . . .
+repeatStart . . . .
+note_2 C5 _ _ upper
+barline . . . .
+voltaStart . . . .
+note_2 D5 _ _ upper
+repeatEnd . . . .
+voltaStop . . . .
+voltaStart . . . .
+note_2 E5 _ _ upper
+barline . . . .
+voltaStop . . . .
+newline . . . .
+repeatStart . . . .
+note_2 F5 _ _ upper
+barline . . . .
+coda . . . .""".splitlines()
+        )
+        root = ET.fromstring(generate_xml(XmlGeneratorArguments(), [tokens], "").to_string())
+        measures = root.findall("./part/measure")
+        self.assertEqual([m.get("number") for m in measures], ["1", "2", "3", "4"])
+        self.assertTrue(all(m.find("note") is not None for m in measures))
+        self.assertEqual(measures[0].find("barline").get("location"), "left")
+        self.assertEqual(measures[0].find("barline/repeat").get("direction"), "forward")
+        self.assertEqual(measures[3].find("barline[@location='left']/repeat").get("direction"), "forward")
+        endings = [(m.get("number"), b.get("location"), e.get("type"), e.get("number"))
+                   for m in measures for b in m.findall("barline") for e in b.findall("ending")]
+        self.assertEqual(endings, [("2", "left", "start", "1"), ("2", "right", "stop", "1"),
+                                   ("3", "left", "start", "2"), ("3", "right", "stop", "2")])
+        self.assertIsNotNone(measures[3].find("direction/direction-type/coda"))
+        self.assertTrue(all(len(b) for m in measures for b in m.findall("barline")))
+
+    def test_first_ending_stops_at_its_backward_repeat(self) -> None:
+        """When the end of a first ending's bracket was not read, the ending still stops at the backward repeat."""
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+timeSignature_2/4 . . . .
+note_2 C5 _ _ upper
+barline . . . .
+voltaStart . . . .
+note_2 D5 _ _ upper
+repeatEnd . . . .
+voltaStart . . . .
+note_2 E5 _ _ upper
+barline . . . .""".splitlines()
+        )
+        root = ET.fromstring(generate_xml(XmlGeneratorArguments(), [tokens], "").to_string())
+        endings = [(m.get("number"), b.get("location"), e.get("type"), e.get("number"))
+                   for m in root.findall("./part/measure") for b in m.findall("barline") for e in b.findall("ending")]
+        self.assertEqual(endings, [("2", "left", "start", "1"), ("2", "right", "stop", "1"),
+                                   ("3", "left", "start", "2"), ("3", "right", "discontinue", "2")])
 
     def test_begin_chord_with_standalone_rests(self) -> None:
         """

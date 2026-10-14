@@ -36,7 +36,17 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
 Her satırın güveni, modelin seçtiği ritim, perde ve arıza olasılıklarının en küçüğüdür; ölçü işareti, ölçü
 çizgisi, tekrar ve volta satırlarında yalnız işaretin kendisi sayılır. Ölçünün güveni içindeki satırların en
 düşüğüdür. 0,5'in altı `uyarilar`'a yazılır. Örnek: basılı Mus2 ve dizgi sayfalarda düşük güvenli ölçü yok, el
-yazısı bir sayfada 34 ölçünün 5'i.
+yazısı bir sayfada 32 ölçünün 5'i. Süreleri ölçü işaretini tutmayan ölçüler de numaralarıyla `uyarilar`'a yazılır
+(ilk ve son ölçü yalnız uzunsa; kısa olmaları ön vuruş olabilir).
+
+## MusicXML yapısı
+
+- Notasız ölçü yazılmaz; ölçüler 1'den boşluksuz numaralanır.
+- İleri tekrar ölçünün `left` barline'ında, geri tekrar `right`'ta. Volta numaraları sırayla (1, 2); bitişi
+  okunmamış birinci volta geri tekrarda, açık kalan son volta son ölçüde (`discontinue`) kapanır.
+- `location="middle"` barline yazılmaz. Süsleme (çarpma) notaları `<grace/>` ile gelir.
+- Arıza adları SMuFL özniteliğiyle: AEU (`accidentalKomaFlat` …) ve THM 2/3 koma (`accidental2CommaSharp`,
+  `accidental3CommaSharp`, `accidental2CommaFlat`, `accidental3CommaFlat`).
 
 ## Süre (14.10.2026, bu bilgisayar)
 

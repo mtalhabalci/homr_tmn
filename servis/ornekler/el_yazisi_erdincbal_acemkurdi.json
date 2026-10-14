@@ -23,125 +23,119 @@
   },
   {
    "olcu": 6,
-   "guven": 0.887
-  },
-  {
-   "olcu": 7,
    "guven": 0.709
   },
   {
-   "olcu": 8,
+   "olcu": 7,
    "guven": 0.544
   },
   {
-   "olcu": 9,
+   "olcu": 8,
    "guven": 0.898
   },
   {
-   "olcu": 10,
+   "olcu": 9,
    "guven": 0.893
   },
   {
-   "olcu": 11,
+   "olcu": 10,
    "guven": 0.673
   },
   {
-   "olcu": 12,
+   "olcu": 11,
    "guven": 0.381
   },
   {
-   "olcu": 13,
+   "olcu": 12,
    "guven": 0.849
   },
   {
-   "olcu": 14,
+   "olcu": 13,
    "guven": 0.898
   },
   {
-   "olcu": 15,
+   "olcu": 14,
    "guven": 0.439
   },
   {
-   "olcu": 16,
+   "olcu": 15,
    "guven": 0.876
   },
   {
-   "olcu": 17,
+   "olcu": 16,
    "guven": 0.424
   },
   {
-   "olcu": 18,
+   "olcu": 17,
    "guven": 0.478
   },
   {
-   "olcu": 19,
+   "olcu": 18,
    "guven": 0.708
   },
   {
-   "olcu": 20,
+   "olcu": 19,
    "guven": 0.663
   },
   {
-   "olcu": 21,
+   "olcu": 20,
    "guven": 0.749
   },
   {
-   "olcu": 22,
+   "olcu": 21,
    "guven": 0.605
   },
   {
-   "olcu": 23,
+   "olcu": 22,
    "guven": 0.877
   },
   {
-   "olcu": 24,
+   "olcu": 23,
    "guven": 0.887
   },
   {
-   "olcu": 25,
+   "olcu": 24,
    "guven": 0.833
   },
   {
-   "olcu": 26,
+   "olcu": 25,
    "guven": 0.896
   },
   {
-   "olcu": 27,
+   "olcu": 26,
    "guven": 0.895
   },
   {
-   "olcu": 28,
+   "olcu": 27,
    "guven": 0.9
   },
   {
-   "olcu": 29,
+   "olcu": 28,
    "guven": 0.842
   },
   {
-   "olcu": 30,
+   "olcu": 29,
    "guven": 0.881
   },
   {
-   "olcu": 31,
+   "olcu": 30,
    "guven": 0.647
   },
   {
-   "olcu": 32,
+   "olcu": 31,
    "guven": 0.898
   },
   {
-   "olcu": 33,
+   "olcu": 32,
    "guven": 0.572
-  },
-  {
-   "olcu": 34,
-   "guven": 0.801
   }
  ],
  "uyarilar": [
-  "5 ölçüde okuma güveni düşük; bu ölçüler kontrol edilmeli."
+  "5 ölçüde okuma güveni düşük; bu ölçüler kontrol edilmeli.",
+  "Ölçü 16: süreler ölçü işaretini tutmuyor; kontrol edilmeli."
  ],
  "porteSayisi": 8,
- "sureMs": 7021,
+ "sayfaSayisi": 1,
+ "sureMs": 7316,
  "kaynak": "datasets/erdincbal-real/exam/pdf/evet/EB03676__acemkurdi--sarki--duyek--baharla_hazan--avni_anil.pdf"
 }

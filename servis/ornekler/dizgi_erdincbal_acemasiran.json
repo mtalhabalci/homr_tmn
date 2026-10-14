@@ -75,7 +75,7 @@
   },
   {
    "olcu": 19,
-   "guven": 0.905
+   "guven": 0.9
   },
   {
    "olcu": 20,
@@ -87,19 +87,18 @@
   },
   {
    "olcu": 22,
-   "guven": 0.9
-  },
-  {
-   "olcu": 23,
    "guven": 0.635
   },
   {
-   "olcu": 24,
+   "olcu": 23,
    "guven": 0.642
   }
  ],
- "uyarilar": [],
+ "uyarilar": [
+  "Ölçü 10: süreler ölçü işaretini tutmuyor; kontrol edilmeli."
+ ],
  "porteSayisi": 8,
- "sureMs": 6962,
+ "sayfaSayisi": 1,
+ "sureMs": 7271,
  "kaynak": "datasets/erdincbal-real/exam/pdf/hayir/EB01816__acemasiran--sarki--aksak--oldu_gonul--dede_efendi.pdf"
 }
