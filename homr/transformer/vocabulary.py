@@ -583,6 +583,9 @@ class EncodedSymbol:
         # this ordering can be used to reject cases where attention-based coordinates
         # violate monotonic scan constraints and are therefore unreliable.
         self.coordinates = coordinates
+        # How sure the reader was of this row: the smallest probability among its chosen rhythm, pitch and
+        # accidental. Set by the decoder; None for symbols that were not read from an image.
+        self.confidence: float | None = None
         # What the note sounds, as opposed to what is printed on it. A makam
         # score leaves four of every five alterations to the key signature and
         # the measure's memory, so the printed symbol alone does not give the

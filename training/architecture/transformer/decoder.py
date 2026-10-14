@@ -1,3 +1,4 @@
+import math
 from typing import Any
 
 import torch
@@ -12,6 +13,7 @@ from homr.transformer.vocabulary import (
     ends_in_loop,
     fix_measure_sums,
     has_rhythm_symbol_a_position,
+    key_accidental,
     misread_opening_meter,
     nonote,
 )
@@ -297,6 +299,8 @@ class ScoreDecoder(nn.Module):
 
         symbols: list[EncodedSymbol] = []
         alternatives: list[list[tuple[str, float]]] = []
+        # probability of the chosen pitch and accidental per row, 1.0 where the row has none
+        sureness: list[tuple[float, float]] = []
 
         cache = init_cache(0, self.device)[0]
 
@@ -356,6 +360,12 @@ class ScoreDecoder(nn.Module):
                 position=position_token[0],
             )
             symbols.append(symbol)
+            sureness.append((
+                float(torch.softmax(pitchsp[0, -1, :].float(), dim=-1)[pitch_sample[0][0]])
+                if pitch_token[0] != nonote else 1.0,
+                float(torch.softmax(liftsp[0, -1, :].float(), dim=-1)[lift_sample[0][0]])
+                if lift_token[0] != nonote else 1.0,
+            ))
             # the best rhythm choices of this step, the chosen one first, for fix_measure_sums;
             # at a time signature the best other time signatures, which it may take instead
             logp = torch.log_softmax(rhythmsp[0, -1, :].float(), dim=-1)
@@ -369,6 +379,7 @@ class ScoreDecoder(nn.Module):
             if ends_in_loop(symbols):
                 del symbols[-LOOP_RUN:]
                 del alternatives[-LOOP_RUN:]
+                del sureness[-LOOP_RUN:]
                 break
 
             out_lift = torch.cat((out_lift, lift_sample), dim=-1)
@@ -378,6 +389,15 @@ class ScoreDecoder(nn.Module):
             mask = F.pad(mask, (0, 1), value=True)
 
         fix_measure_sums(symbols, alternatives)
+        # After the measure fix, so a rhythm it re-chose is scored by its own probability. Pitch and accidental
+        # count only where they mean something, on notes and key-signature rows: a barline, repeat or time
+        # signature fills them with a marker nothing reads, and its uncertainty there is no misreading.
+        for symbol, choices, (pitch_p, lift_p) in zip(symbols, alternatives, sureness, strict=False):
+            rhythm_p = math.exp(dict(choices).get(symbol.rhythm, choices[0][1]))
+            if symbol.rhythm.startswith("note") or symbol.rhythm == key_accidental:
+                symbol.confidence = min(rhythm_p, pitch_p, lift_p)
+            else:
+                symbol.confidence = rhythm_p
         self.net.train(was_training)
         return symbols
 

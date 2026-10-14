@@ -92,18 +92,28 @@ class SymbolChord:
 
 class XmlGeneratorArguments:
     def __init__(
-        self, large_page: bool | None = None, metronome: int | None = None, tempo: int | None = None
+        self,
+        large_page: bool | None = None,
+        metronome: int | None = None,
+        tempo: int | None = None,
+        software: str = "homr",
+        measure_confidence: dict[int, float] | None = None,
     ):
         self.large_page = large_page
         self.metronome = metronome
         self.tempo = tempo
+        # the name written to <encoding><software>; an application serving its own model sets its own
+        self.software = software
+        # when a dict is given, filled with the lowest symbol confidence of each written measure, keyed by
+        # the measure's number in the file
+        self.measure_confidence = measure_confidence
 
 
-def build_identification() -> mxl.XMLIdentification:
+def build_identification(args: XmlGeneratorArguments) -> mxl.XMLIdentification:
     """Identification/encoding so validators and apps (e.g. MuseScore) can attribute the file."""
     ident = mxl.XMLIdentification()
     enc = mxl.XMLEncoding()
-    enc.add_child(mxl.XMLSoftware(value_="homr"))
+    enc.add_child(mxl.XMLSoftware(value_=args.software))
     ident.add_child(enc)
     return ident
 
@@ -113,7 +123,7 @@ def generate_xml(
 ) -> mxl.XMLElement:
     root = mxl.XMLScorePartwise(version="4.0")
     root.add_child(build_work(title))
-    root.add_child(build_identification())
+    root.add_child(build_identification(args))
     root.add_child(build_defaults(args))
     has_two_staves_by_part = [_voice_has_two_staves(staff) for staff in staffs]
     root.add_child(build_part_list(has_two_staves_by_part))
@@ -233,6 +243,12 @@ def build_measures(
     for group_no, group in enumerate(groups):
         symbol = group.symbols[0]
         rhythm = symbol.rhythm
+        if args.measure_confidence is not None:
+            # a barline is counted with the measure it closes: the next measure is opened only below
+            sure = [s.confidence for s in group.symbols if getattr(s, "confidence", None) is not None]
+            if sure:
+                known = args.measure_confidence.get(measure_number, 1.0)
+                args.measure_confidence[measure_number] = min(known, *sure)
         last_attributes = attributes
         attributes = None
         if rhythm.startswith(("note", "rest")):
@@ -475,7 +491,7 @@ def build_makam_key(
         key.add_child(mxl.XMLKeyAlter(value_=alter if alter is not None else 0))
         accidental = LIFT_TO_ACCIDENTAL.get(symbol.lift)
         if accidental is not None:
-            key.add_child(mxl.XMLKeyAccidental(value_=accidental))
+            key.add_child(_with_smufl(mxl.XMLKeyAccidental(value_=accidental), symbol.lift))
 
 
 def get_staff(symbol: EncodedSymbol) -> int:
@@ -689,6 +705,29 @@ LIFT_TO_ACCIDENTAL = {
     "bb": "flat-flat",
 }
 
+# The same glyphs by their SMuFL names, written as the smufl attribute of <accidental> and <key-accidental>
+# so a reader need not guess between MusicXML names that two systems share (a plain flat is 5 commas in
+# AEU). The 2- and 3-comma signs have no SMuFL glyph and go without.
+LIFT_TO_SMUFL = {
+    "sharp1": "accidentalKomaSharp",
+    "sharp4": "accidentalBakiyeSharp",
+    "sharp5": "accidentalKucukMucennebSharp",
+    "sharp8": "accidentalBuyukMucennebSharp",
+    "flat1": "accidentalKomaFlat",
+    "flat4": "accidentalBakiyeFlat",
+    "flat5": "accidentalKucukMucennebFlat",
+    "flat8": "accidentalBuyukMucennebFlat",
+    "N": "accidentalNatural",
+    "##": "accidentalDoubleSharp",
+    "bb": "accidentalDoubleFlat",
+}
+
+
+def _with_smufl(element: mxl.XMLElement, lift: str) -> mxl.XMLElement:
+    if lift in LIFT_TO_SMUFL:
+        element.smufl = LIFT_TO_SMUFL[lift]
+    return element
+
 DURATION_NAMES = {
     0: "breve",
     1: "whole",
@@ -813,7 +852,8 @@ def build_note_or_rest(
         # Emit an explicit <accidental> for every sign the page draws, so the
         # renderer (e.g. MuseScore) draws that symbol rather than its own guess.
         if model_note.lift in LIFT_TO_ACCIDENTAL:
-            note.add_child(mxl.XMLAccidental(value_=LIFT_TO_ACCIDENTAL[model_note.lift]))
+            note.add_child(_with_smufl(mxl.XMLAccidental(value_=LIFT_TO_ACCIDENTAL[model_note.lift]),
+                                       model_note.lift))
 
     if "G" in model_note.rhythm:
         note.add_child(mxl.XMLGrace())

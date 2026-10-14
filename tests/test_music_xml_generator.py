@@ -233,11 +233,48 @@ barline . . . .""".splitlines()
         )
         xml = generate_xml(XmlGeneratorArguments(), [tokens], "").to_string()
         self.assertIn("<key-accidental>flat-2</key-accidental>", xml)
-        for name in ("natural", "double-sharp", "sharp-3"):
-            self.assertIn(f"<accidental>{name}</accidental>", xml)
+        # a sign with a SMuFL glyph names it too; the THM numbered signs have none
+        self.assertIn('<accidental smufl="accidentalNatural">natural</accidental>', xml)
+        self.assertIn('<accidental smufl="accidentalDoubleSharp">double-sharp</accidental>', xml)
+        self.assertIn("<accidental>sharp-3</accidental>", xml)
         # a tie both drawn and sounding
         self.assertIn('<tie type="start"', xml)
         self.assertIn('<tie type="stop"', xml)
+
+    def test_aeu_signs_carry_their_smufl_names(self) -> None:
+        """A reader that resolves accidentals by glyph needs the SMuFL name: a plain flat is 5 commas in AEU."""
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+keyAccidental B4 flat1 _ upper
+timeSignature_2/4 . . . .
+note_4 C5 sharp4 _ upper
+note_4 F5 sharp5 _ upper
+barline . . . .""".splitlines()
+        )
+        xml = generate_xml(XmlGeneratorArguments(), [tokens], "").to_string()
+        self.assertIn('<key-accidental smufl="accidentalKomaFlat">quarter-flat</key-accidental>', xml)
+        self.assertIn('<accidental smufl="accidentalBakiyeSharp">sharp</accidental>', xml)
+        self.assertIn('<accidental smufl="accidentalKucukMucennebSharp">slash-quarter-sharp</accidental>', xml)
+
+    def test_software_name_and_measure_confidence(self) -> None:
+        """An application names itself in <software>; the lowest confidence of each measure is collected."""
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+timeSignature_2/4 . . . .
+note_4 C5 _ _ upper
+note_4 D5 _ _ upper
+barline . . . .
+note_2 E5 _ _ upper
+barline . . . .""".splitlines()
+        )
+        for symbol, sure in zip(tokens, (0.99, 0.98, 0.9, 0.4, 0.97, 0.8, 0.95), strict=False):
+            symbol.confidence = sure
+        confidence: dict[int, float] = {}
+        xml = generate_xml(XmlGeneratorArguments(software="Uygulama", measure_confidence=confidence), [tokens],
+                           "").to_string()
+        self.assertIn("<software>Uygulama</software>", xml)
+        self.assertNotIn("homr", xml)
+        self.assertEqual(confidence, {1: 0.4, 2: 0.8})
 
     def test_begin_chord_with_standalone_rests(self) -> None:
         """
