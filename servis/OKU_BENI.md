@@ -24,8 +24,9 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
 
 - `POST /v1/omr` — multipart `dosya` (JPEG, PNG, WebP, PDF; en çok 20 MB), isteğe bağlı `tur` (`basili` |
   `el_yazisi`; tek model ikisini de okur, yalnız geri yazılır). Yanıt: `musicxml`, `modelVersion`, `olcuGuven`
-  (`[{olcu, guven}]`, ölçü numaraları MusicXML'dekiyle aynı), `uyarilar`, `porteSayisi`, `sureMs`.
-  `?kuyruk=1` ile iş kuyruğa alınır ve hemen `{"isId"}` döner (202).
+  (`[{olcu, guven}]`, ölçü numaraları MusicXML'dekiyle aynı), `uyarilar`, `porteSayisi`, `sayfaSayisi`,
+  `sureMs`. `?kuyruk=1` ile iş kuyruğa alınır ve hemen `{"isId", "sayfaSayisi"}` döner (202). İşler yalnız
+  bellekte durur; servis yeniden başlarsa iş kaybolur (`GET` 404 döner, uygulama yeniden gönderir).
 - `GET /v1/omr/{isId}` — `{"durum": "isleniyor" | "tamam" | "hata", ...}`
 - `GET /v1/saglik` — `{"modelVersion", "cihaz"}`
 - Hatalar: `{"hata", "mesaj"}`; 400 `gecersiz_tur` / `bos_dosya`, 401 `yetkisiz`, 413 `dosya_cok_buyuk`,
