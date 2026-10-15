@@ -103,6 +103,7 @@ class XmlGeneratorArguments:
         software: str = "homr",
         measure_confidence: dict[int, float] | None = None,
         staff_measures: list[tuple[int, int]] | None = None,
+        tempo_marks: dict[int, tuple[str, bool, int]] | None = None,
     ):
         self.large_page = large_page
         self.metronome = metronome
@@ -115,6 +116,9 @@ class XmlGeneratorArguments:
         # when a list is given, filled with (first, last) measure number of every staff, one entry per newline;
         # a measure that runs on from one staff to the next belongs to both
         self.staff_measures = staff_measures
+        # written tempo marks read off the page: measure number -> (beat unit as MusicXML names it, dotted,
+        # beats per minute); each becomes a <metronome> with its <sound tempo> at the start of that measure
+        self.tempo_marks = tempo_marks or {}
 
 
 def build_identification(args: XmlGeneratorArguments) -> mxl.XMLIdentification:
@@ -228,6 +232,12 @@ def build_measures(
                 current_measure.add_child(note_xml)
         played_now.append(group)
 
+    def open_measure(number: int) -> mxl.XMLMeasure:
+        measure = mxl.XMLMeasure(number=str(number))
+        if is_first_part and number in args.tempo_marks:
+            measure.add_child(build_tempo_direction(*args.tempo_marks[number]))
+        return measure
+
     def end_repeat() -> None:
         """A backward repeat on the barline that closes this measure, or on the one that already closed the
         measure before (a plain barline came first). A first ending always ends at the backward repeat, so an
@@ -242,7 +252,7 @@ def build_measures(
         if closes:
             close_current_measure()
             measure_number += 1
-            current_measure = mxl.XMLMeasure(number=str(measure_number))
+            current_measure = open_measure(measure_number)
 
     # The note groups of this measure and the one before: a measure-repeat sign plays the one
     # before again, so its notes are written out once more (the musicxml elements cannot be copied).
@@ -256,7 +266,7 @@ def build_measures(
     division, nominator = find_division_and_time_signature_nominator(groups)
     state = ConversionState(division, nominator)
     measures: list[mxl.XMLMeasure] = []
-    current_measure = mxl.XMLMeasure(number=str(measure_number))
+    current_measure = open_measure(measure_number)
     first_attributes = build_or_get_attributes(current_measure, None)
     first_attributes.add_child(build_divisions(division))
     if has_two_staves:
@@ -335,14 +345,14 @@ def build_measures(
 
             close_current_measure()
             measure_number += 1
-            current_measure = mxl.XMLMeasure(number=str(measure_number))
+            current_measure = open_measure(measure_number)
         elif rhythm == "repeatStart":
             # A forward repeat stands at the left of the measure it opens. Right after a barline, or at
             # the start of a staff, that measure is already open and holds no notes yet.
             if _has_music(current_measure):
                 close_current_measure()
                 measure_number += 1
-                current_measure = mxl.XMLMeasure(number=str(measure_number))
+                current_measure = open_measure(measure_number)
 
             barline = build_or_get_barline(current_measure, "left")
             build_repeat(symbol, barline)
@@ -371,7 +381,7 @@ def build_measures(
                 build_barline_ending(symbol, barline, volta_number)
                 close_current_measure()
                 measure_number += 1
-                current_measure = mxl.XMLMeasure(number=str(measure_number))
+                current_measure = open_measure(measure_number)
             elif measures:
                 volta_number = state.stop_volta(measure_number - 1)
                 barline = build_or_get_barline(measures[-1], "right")
@@ -1030,6 +1040,25 @@ def _group_notes(notes: list[EncodedSymbol]) -> dict[Fraction, list[EncodedSymbo
             fraction = duration.fraction
         groups_by_duration[fraction].append(note)
     return groups_by_duration
+
+
+QUARTERS_PER_BEAT = {"whole": 4.0, "half": 2.0, "quarter": 1.0, "eighth": 0.5, "16th": 0.25}
+
+
+def build_tempo_direction(unit: str, dotted: bool, per_minute: int) -> mxl.XMLDirection:
+    """A written tempo such as an eighth = 168: the mark as printed, and the playback tempo in quarters per minute."""
+    direction = mxl.XMLDirection(placement="above")
+    direction_type = mxl.XMLDirectionType()
+    direction.add_child(direction_type)
+    metronome = mxl.XMLMetronome()
+    direction_type.add_child(metronome)
+    metronome.add_child(mxl.XMLBeatUnit(value_=unit))
+    if dotted:
+        metronome.add_child(mxl.XMLBeatUnitDot())
+    metronome.add_child(mxl.XMLPerMinute(value_=str(per_minute)))
+    quarters = per_minute * QUARTERS_PER_BEAT[unit] * (1.5 if dotted else 1.0)
+    direction.add_child(mxl.XMLSound(tempo=int(quarters) if quarters.is_integer() else round(quarters, 2)))
+    return direction
 
 
 def build_add_time_direction(args: XmlGeneratorArguments) -> mxl.XMLDirection | None:

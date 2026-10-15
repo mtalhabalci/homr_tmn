@@ -365,6 +365,24 @@ newline . . . .""".splitlines()
         generate_xml(XmlGeneratorArguments(staff_measures=ranges), [tokens], "")
         self.assertEqual(ranges, [(1, 2), (2, 3)])
 
+    def test_tempo_marks_become_metronome_and_playback_tempo(self) -> None:
+        """A tempo read off the page opens its measure: the printed mark and the tempo in quarters per minute."""
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+timeSignature_2/4 . . . .
+note_2 C5 _ _ upper
+barline . . . .
+note_2 D5 _ _ upper
+barline . . . .""".splitlines()
+        )
+        args = XmlGeneratorArguments(tempo_marks={1: ("eighth", False, 168), 2: ("quarter", True, 60)})
+        root = ET.fromstring(generate_xml(args, [tokens], "").to_string())
+        marks = [(m.get("number"), d.findtext("direction-type/metronome/beat-unit"),
+                  d.find("direction-type/metronome/beat-unit-dot") is not None,
+                  d.findtext("direction-type/metronome/per-minute"), d.find("sound").get("tempo"))
+                 for m in root.findall("./part/measure") for d in m.findall("direction")]
+        self.assertEqual(marks, [("1", "eighth", False, "168", "84"), ("2", "quarter", True, "60", "90")])
+
     def test_first_ending_stops_at_its_backward_repeat(self) -> None:
         """When the end of a first ending's bracket was not read, the ending still stops at the backward repeat."""
         tokens = read_token_lines(

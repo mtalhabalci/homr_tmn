@@ -19,6 +19,7 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
 | `OMR_ANAHTAR` | boş | doluysa `X-Omr-Anahtar` başlığı buna eşit olmalı |
 | `OMR_PORT` | `8765` | port |
 | `OMR_GPU_SEGMENTASYON` | kapalı | `1`: porte bulma da ekran kartında |
+| `OMR_TEMPO_MODEL` | `training/architecture/tempo/tempo_okuyucu.pt` | tempo okuyucunun ağırlığı (git dışında); yoksa tempo okunmaz |
 
 ## Uç noktalar
 
@@ -32,7 +33,11 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
   piksel konumudur: fotoğrafta yüklenen resmin kendisi, PDF'te servisin 1920 piksel genişlikte çizdiği sayfa.
   Ölçü numaraları MusicXML'dekiyle aynıdır; satır sonunda bölünen bir ölçü iki portede de görünür, ölçüsü
   olmayan bir portede ikisi de `null`'dır. `sayfaResimleri`: okunan her sayfa için `{sayfa, genislik, yukseklik,
-  dpi}` (fotoğrafta `dpi` `null`). Kullanıcı düzeltmelerinin porte görüntüsüne eşlenmesi içindir. `?kuyruk=1` ile iş kuyruğa alınır ve hemen
+  dpi}` (fotoğrafta `dpi` `null`). Kullanıcı düzeltmelerinin porte görüntüsüne eşlenmesi içindir.
+  `tempolar`: sayfada yazılı tempo işaretleri (♪ = 112 gibi), her biri `{olcu, birim, noktali, deger, guven,
+  porte, sayfa, kutu}` (kutu: işaretin sayfa resmindeki yeri); `birim` MusicXML adıyla (`eighth`, `quarter`, …). Aynı işaret MusicXML'de o ölçünün başında
+  `<metronome>` ve dörtlük cinsinden `<sound tempo>` olarak yazılır. İşaret okunamadıysa liste boştur; uygulama
+  usule göre varsayılan tempoyu kullanır. `?kuyruk=1` ile iş kuyruğa alınır ve hemen
   `{"isId", "sayfaSayisi", "toplamSayfa"}` döner (202). İşler yalnız bellekte durur; servis yeniden başlarsa iş
   kaybolur (`GET` 404 döner, uygulama yeniden gönderir).
 - `GET /v1/omr/{isId}` — `{"durum": "isleniyor" | "tamam" | "hata" | "iptal", "islenenSayfa", "islenenPorte", ...}`;

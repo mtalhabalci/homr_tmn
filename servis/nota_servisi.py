@@ -48,6 +48,7 @@ from homr.main import ProcessingConfig, detect_staffs_in_image
 from homr.music_xml_generator import XmlGeneratorArguments, generate_xml
 from homr.staff_parsing import prepare_staff_image
 from homr.staff_regions import StaffRegions
+from homr.tempo_reader import read_tempo_marks
 from homr.transformer.configs import Config
 from homr.transformer.vocabulary import EncodedSymbol
 from training.architecture.transformer.tromr_arch import load_model
@@ -106,6 +107,30 @@ def measures_off_meter(musicxml: str) -> list[int]:
         if length > meter or (length < meter and not edge):
             off.append(int(measure.get("number")))
     return off
+
+
+def tempo_measures(found: list, staff_boxes: list[tuple[int, list[int]]],
+                   staff_measures: list[tuple[int, int]]) -> list[dict]:
+    """The measure each tempo mark starts: a mark near the start of its staff opens the staff's first measure,
+    one further along the measure under it, counting the staff's measures as equally wide. One mark per measure,
+    the surest."""
+    chosen: dict[int, dict] = {}
+    for staff, mark in found:
+        if staff >= len(staff_measures):
+            continue
+        first, last = staff_measures[staff]
+        if first > last:
+            continue
+        x0, _, x1, _ = staff_boxes[staff][1]
+        along = (mark.box[0] - x0) / max(1, x1 - x0)
+        count = last - first + 1
+        measure = first if along < 0.2 else first + min(count - 1, int(along * count))
+        entry = {"olcu": measure, "birim": mark.unit, "noktali": mark.dotted, "deger": mark.per_minute,
+                 "guven": mark.confidence, "porte": staff + 1, "sayfa": staff_boxes[staff][0],
+                 "kutu": [int(v) for v in mark.box]}
+        if measure not in chosen or chosen[measure]["guven"] < mark.confidence:
+            chosen[measure] = entry
+    return [chosen[m] for m in sorted(chosen)]
 
 
 class ReadError(Exception):
@@ -168,6 +193,7 @@ class Reader:
         staffs = 0
         page_info: list[dict] = []
         staff_boxes: list[tuple[int, list[int]]] = []
+        tempo_found: list[tuple[int, object]] = []  # (staff number from 0, TempoMark)
         total = page_count(path)
         pages = pages or list(range(1, total + 1))
         with self.lock, tempfile.TemporaryDirectory() as scratch:
@@ -189,6 +215,7 @@ class Reader:
                 scale_x, scale_y = box[2] / preprocessed.shape[1], box[3] / preprocessed.shape[0]
                 page_info.append({"sayfa": page_no, "genislik": width, "yukseklik": height, "dpi": dpi})
                 found = sorted((s for multi in multi_staffs for s in multi.staffs), key=lambda s: s.min_y)
+                page_first = len(staff_boxes)
                 for number, staff in enumerate(found):
                     if cancel is not None and cancel.is_set():
                         raise Cancelled
@@ -207,20 +234,32 @@ class Reader:
                                                   round(box[0] + staff.max_x * scale_x),
                                                   round(box[1] + staff.max_y * scale_y)]))
                     staffs += 1
+                gray_page = cv2.cvtColor(page_pixels, cv2.COLOR_BGR2GRAY)
+                for mark in read_tempo_marks(gray_page, [tuple(b) for _, b in staff_boxes[page_first:]]):
+                    tempo_found.append((page_first + mark.staff, mark))
                 if progress is not None:
                     progress(done + 1, staffs)
             if not staffs:
                 raise ReadError(422, "porte_bulunamadi",
                                 "Görüntüde okunabilir porte bulunamadı. Sayfanın tamamı, düz ve net çekilmiş "
                                 "olmalı.")
-            confidence: dict[int, float] = {}
-            staff_measures: list[tuple[int, int]] = []
-            args = XmlGeneratorArguments(software=SOFTWARE, measure_confidence=confidence,
-                                         staff_measures=staff_measures)
             out = os.path.join(scratch, "sonuc.musicxml")
-            generate_xml(args, [voice], "").write(out)
-            with open(out, encoding="utf-8") as handle:
-                musicxml = handle.read()
+
+            def write(tempo_marks: dict) -> tuple[str, dict[int, float], list[tuple[int, int]]]:
+                confidence: dict[int, float] = {}
+                staff_measures: list[tuple[int, int]] = []
+                args = XmlGeneratorArguments(software=SOFTWARE, measure_confidence=confidence,
+                                             staff_measures=staff_measures, tempo_marks=tempo_marks)
+                generate_xml(args, [voice], "").write(out)
+                with open(out, encoding="utf-8") as handle:
+                    return handle.read(), confidence, staff_measures
+
+            musicxml, confidence, staff_measures = write({})
+            tempos = tempo_measures(tempo_found, staff_boxes, staff_measures)
+            if tempos:
+                # the measures are known only once written: write again with the tempo marks in their measures
+                musicxml, confidence, staff_measures = write({t["olcu"]: (t["birim"], t["noktali"], t["deger"])
+                                                              for t in tempos})
         written = {int(n) for n in re.findall(r'<measure number="(\d+)"', musicxml)}
         measures = [{"olcu": n, "guven": round(c, 3)} for n, c in sorted(confidence.items()) if n in written]
         weak = sum(1 for m in measures if m["guven"] < LOW_CONFIDENCE)
@@ -236,7 +275,7 @@ class Reader:
                                "olcuBas": first if measured else None, "olcuSon": last if measured else None})
         return {"musicxml": musicxml, "modelVersion": MODEL_VERSION, "olcuGuven": measures, "uyarilar": warnings,
                 "porteSayisi": staffs, "sayfaSayisi": len(pages), "toplamSayfa": total, "sayfalar": pages,
-                "porteler": staff_list, "sayfaResimleri": page_info,
+                "porteler": staff_list, "sayfaResimleri": page_info, "tempolar": tempos,
                 "sureMs": round((time.perf_counter() - start) * 1000)}
 
 
