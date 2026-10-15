@@ -33,7 +33,9 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
   piksel konumudur: fotoğrafta yüklenen resmin kendisi, PDF'te servisin 1920 piksel genişlikte çizdiği sayfa.
   Ölçü numaraları MusicXML'dekiyle aynıdır; satır sonunda bölünen bir ölçü iki portede de görünür, ölçüsü
   olmayan bir portede ikisi de `null`'dır. `sayfaResimleri`: okunan her sayfa için `{sayfa, genislik, yukseklik,
-  dpi}` (fotoğrafta `dpi` `null`). Kullanıcı düzeltmelerinin porte görüntüsüne eşlenmesi içindir.
+  dpi, kaynak}` (fotoğrafta `dpi` `null`). Kullanıcı düzeltmelerinin porte görüntüsüne eşlenmesi içindir.
+  `kaynak`: `fotograf` (resim yüklendi), `tarama` (PDF sayfası bir resim: taranmış ya da fotokopi) ya da `dijital`
+  (PDF sayfası nota programından çıkmış çizim). Tarama ve fotoğrafta okuma, özellikle tempo, daha az güvenilirdir.
   `tempolar`: sayfada yazılı tempo işaretleri (♪ = 112 gibi), her biri `{olcu, birim, noktali, deger, guven,
   porte, sayfa, kutu}` (kutu: işaretin sayfa resmindeki yeri); `birim` MusicXML adıyla (`eighth`, `quarter`, …). Aynı işaret MusicXML'de o ölçünün başında
   `<metronome>` ve dörtlük cinsinden `<sound tempo>` olarak yazılır. İşaret okunamadıysa liste boştur; uygulama

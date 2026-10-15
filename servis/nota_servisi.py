@@ -8,7 +8,7 @@
                             ?kuyruk=1 queues the job and answers {"isId", "sayfaSayisi", "toplamSayfa"} at once;
                             jobs live in memory only, so a restart loses them (GET answers 404, the app sends again)
                             Besides the MusicXML the answer carries "porteler" (per staff: page, box on the page image,
-                            first and last measure) and "sayfaResimleri" (per page: image size and DPI)
+                            first and last measure) and "sayfaResimleri" (per page: image size, DPI, scan or typeset)
     GET  /v1/omr/{isId}     {"durum": "isleniyor" | "tamam" | "hata" | "iptal", "islenenSayfa", "islenenPorte", ...}
     DELETE /v1/omr/{isId}   a running job stops before its next staff and stays as durum "iptal" (202); a finished
                             one is removed (200)
@@ -109,6 +109,14 @@ def measures_off_meter(musicxml: str) -> list[int]:
     return off
 
 
+def scanned(page) -> bool:
+    """Whether a PDF page is a scan: pictures cover most of it (a scan may come in strips) and it has hardly any
+    vector drawing, where typeset notation has hundreds (staff lines, stems, beams)."""
+    area = abs(page.rect)
+    cover = sum(abs(fitz.Rect(info["bbox"]) & page.rect) for info in page.get_image_info()) / area
+    return cover >= 0.5 and len(page.get_drawings()) < 50
+
+
 def tempo_measures(found: list, staff_boxes: list[tuple[int, list[int]]],
                    staff_measures: list[tuple[int, int]]) -> list[dict]:
     """The measure each tempo mark starts: a mark near the start of its staff opens the staff's first measure,
@@ -172,16 +180,18 @@ class Reader:
         self.processing = ProcessingConfig(False, False, False, False, -1,
                                            os.environ.get("OMR_GPU_SEGMENTASYON") == "1")
 
-    def _page_image(self, path: str, scratch: str, page_no: int) -> tuple[str, float | None]:
-        """The page as an image file, and its resolution in DPI (a PDF page is rendered; a photo has none)."""
+    def _page_image(self, path: str, scratch: str, page_no: int) -> tuple[str, float | None, str]:
+        """The page as an image file, its resolution in DPI (a PDF page is rendered; a photo has none) and where it
+        comes from: 'fotograf', 'tarama' (a PDF page that is a picture) or 'dijital' (a PDF page drawn as notation)."""
         if not path.endswith(".pdf"):
-            return path, None
+            return path, None, "fotograf"
         with fitz.open(path) as document:
             page = document[page_no - 1]
             zoom = PAGE_WIDTH / page.rect.width
             image = os.path.join(scratch, f"sayfa-{page_no}.png")
             page.get_pixmap(matrix=fitz.Matrix(zoom, zoom)).save(image)
-        return image, round(72 * zoom, 2)
+            source = "tarama" if scanned(page) else "dijital"
+        return image, round(72 * zoom, 2), source
 
     def read(self, path: str, pages: list[int] | None = None, progress=None,
              cancel: threading.Event | None = None) -> dict:
@@ -200,7 +210,7 @@ class Reader:
             for done, page_no in enumerate(pages):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled
-                image, dpi = self._page_image(path, scratch, page_no)
+                image, dpi, source = self._page_image(path, scratch, page_no)
                 page_pixels = cv2.imread(image)
                 where = f"{page_no}. sayfa" if total > 1 else "Sayfa"
                 try:
@@ -213,7 +223,8 @@ class Reader:
                 height, width = page_pixels.shape[:2]
                 box = autocrop_box(page_pixels) or (0, 0, width, height)
                 scale_x, scale_y = box[2] / preprocessed.shape[1], box[3] / preprocessed.shape[0]
-                page_info.append({"sayfa": page_no, "genislik": width, "yukseklik": height, "dpi": dpi})
+                page_info.append({"sayfa": page_no, "genislik": width, "yukseklik": height, "dpi": dpi,
+                                  "kaynak": source})
                 found = sorted((s for multi in multi_staffs for s in multi.staffs), key=lambda s: s.min_y)
                 page_first = len(staff_boxes)
                 for number, staff in enumerate(found):
