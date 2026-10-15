@@ -134,8 +134,8 @@ def tempo_measures(found: list, staff_boxes: list[tuple[int, list[int]]],
         count = last - first + 1
         measure = first if along < 0.2 else first + min(count - 1, int(along * count))
         entry = {"olcu": measure, "birim": mark.unit, "noktali": mark.dotted, "deger": mark.per_minute,
-                 "guven": mark.confidence, "porte": staff + 1, "sayfa": staff_boxes[staff][0],
-                 "kutu": [int(v) for v in mark.box]}
+                 "aralik": list(mark.range) if mark.range else None, "guven": mark.confidence, "porte": staff + 1,
+                 "sayfa": staff_boxes[staff][0], "kutu": [int(v) for v in mark.box]}
         if measure not in chosen or chosen[measure]["guven"] < mark.confidence:
             chosen[measure] = entry
     return [chosen[m] for m in sorted(chosen)]
@@ -269,8 +269,9 @@ class Reader:
             tempos = tempo_measures(tempo_found, staff_boxes, staff_measures)
             if tempos:
                 # the measures are known only once written: write again with the tempo marks in their measures
-                musicxml, confidence, staff_measures = write({t["olcu"]: (t["birim"], t["noktali"], t["deger"])
-                                                              for t in tempos})
+                musicxml, confidence, staff_measures = write(
+                    {t["olcu"]: (t["birim"], t["noktali"], t["deger"],
+                                 "{}–{}".format(*t["aralik"]) if t["aralik"] else None) for t in tempos})
         written = {int(n) for n in re.findall(r'<measure number="(\d+)"', musicxml)}
         measures = [{"olcu": n, "guven": round(c, 3)} for n, c in sorted(confidence.items()) if n in written]
         weak = sum(1 for m in measures if m["guven"] < LOW_CONFIDENCE)

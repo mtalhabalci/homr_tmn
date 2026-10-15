@@ -103,7 +103,7 @@ class XmlGeneratorArguments:
         software: str = "homr",
         measure_confidence: dict[int, float] | None = None,
         staff_measures: list[tuple[int, int]] | None = None,
-        tempo_marks: dict[int, tuple[str, bool, int]] | None = None,
+        tempo_marks: dict[int, tuple] | None = None,
     ):
         self.large_page = large_page
         self.metronome = metronome
@@ -1045,8 +1045,9 @@ def _group_notes(notes: list[EncodedSymbol]) -> dict[Fraction, list[EncodedSymbo
 QUARTERS_PER_BEAT = {"whole": 4.0, "half": 2.0, "quarter": 1.0, "eighth": 0.5, "16th": 0.25}
 
 
-def build_tempo_direction(unit: str, dotted: bool, per_minute: int) -> mxl.XMLDirection:
-    """A written tempo such as an eighth = 168: the mark as printed, and the playback tempo in quarters per minute."""
+def build_tempo_direction(unit: str, dotted: bool, per_minute: int, written: str | None = None) -> mxl.XMLDirection:
+    """A written tempo such as an eighth = 168: the mark as printed, and the playback tempo in quarters per minute.
+    written is the printed number when it is not per_minute alone (a range '150-180', played at its middle)."""
     direction = mxl.XMLDirection(placement="above")
     direction_type = mxl.XMLDirectionType()
     direction.add_child(direction_type)
@@ -1055,7 +1056,7 @@ def build_tempo_direction(unit: str, dotted: bool, per_minute: int) -> mxl.XMLDi
     metronome.add_child(mxl.XMLBeatUnit(value_=unit))
     if dotted:
         metronome.add_child(mxl.XMLBeatUnitDot())
-    metronome.add_child(mxl.XMLPerMinute(value_=str(per_minute)))
+    metronome.add_child(mxl.XMLPerMinute(value_=written or str(per_minute)))
     quarters = per_minute * QUARTERS_PER_BEAT[unit] * (1.5 if dotted else 1.0)
     direction.add_child(mxl.XMLSound(tempo=int(quarters) if quarters.is_integer() else round(quarters, 2)))
     return direction

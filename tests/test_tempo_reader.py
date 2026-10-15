@@ -1,4 +1,4 @@
-from homr.tempo_reader import playable, too_wide
+from homr.tempo_reader import numbers, playable, too_wide
 
 
 def test_a_line_of_words_and_notes_is_too_wide_for_a_tempo_mark() -> None:
@@ -16,3 +16,10 @@ def test_a_quarter_at_728_is_no_tempo_but_an_eighth_at_440_is() -> None:
     assert playable("U8", False, 440)
     assert playable("U4", True, 60)
     assert not playable("U16", False, 60)
+
+
+def test_a_range_is_read_as_its_two_ends_and_a_bare_number_as_one() -> None:
+    assert numbers(["U4", "7", "2", "-", "8", "4"]) == (72, 84)
+    assert numbers(["U8", "1", "6", "0"]) == (160, None)
+    assert numbers(["U4", "8", "4", "-", "7", "2"]) is None
+    assert numbers(["U4", "7", "2", "-"]) is None

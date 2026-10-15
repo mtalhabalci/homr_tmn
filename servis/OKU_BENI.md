@@ -20,6 +20,7 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
 | `OMR_PORT` | `8765` | port |
 | `OMR_GPU_SEGMENTASYON` | kapalı | `1`: porte bulma da ekran kartında |
 | `OMR_TEMPO_MODEL` | `training/architecture/tempo/tempo_okuyucu.pt` | tempo okuyucunun ağırlığı (git dışında); yoksa tempo okunmaz |
+| `OMR_TEMPO_ARALIK_MODEL` | `training/architecture/tempo/tempo_okuyucu_aralik.pt` | aralıkları (♩ = 72–84) daha iyi okuyan ikinci okuyucu; yalnız aralık okuduğu yerde kullanılır, yoksa atlanır |
 
 ## Uç noktalar
 
@@ -36,10 +37,12 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
   dpi, kaynak}` (fotoğrafta `dpi` `null`). Kullanıcı düzeltmelerinin porte görüntüsüne eşlenmesi içindir.
   `kaynak`: `fotograf` (resim yüklendi), `tarama` (PDF sayfası bir resim: taranmış ya da fotokopi) ya da `dijital`
   (PDF sayfası nota programından çıkmış çizim). Tarama ve fotoğrafta okuma, özellikle tempo, daha az güvenilirdir.
-  `tempolar`: sayfada yazılı tempo işaretleri (♪ = 112 gibi), her biri `{olcu, birim, noktali, deger, guven,
-  porte, sayfa, kutu}` (kutu: işaretin sayfa resmindeki yeri); `birim` MusicXML adıyla (`eighth`, `quarter`, …). Aynı işaret MusicXML'de o ölçünün başında
-  `<metronome>` ve dörtlük cinsinden `<sound tempo>` olarak yazılır. İşaret okunamadıysa liste boştur; uygulama
-  usule göre varsayılan tempoyu kullanır. `?kuyruk=1` ile iş kuyruğa alınır ve hemen
+  `tempolar`: sayfada yazılı tempo işaretleri (♪ = 112 gibi), her biri `{olcu, birim, noktali, deger, aralik,
+  guven, porte, sayfa, kutu}` (kutu: işaretin sayfa resmindeki yeri); `birim` MusicXML adıyla (`eighth`,
+  `quarter`, …). Aralık yazılmışsa (♩ = 72–84) `aralik` `[72, 84]`, `deger` ortası (78); değilse `aralik` `null`.
+  Dörtlük karşılığı dakikada 20–300 dışında kalan okuma yanlış sayılır ve gönderilmez. Aynı işaret MusicXML'de o
+  ölçünün başında `<metronome>` (aralıkta `<per-minute>72–84</per-minute>`) ve dörtlük cinsinden `<sound tempo>`
+  olarak yazılır. İşaret okunamadıysa liste boştur; uygulama usule göre varsayılan tempoyu kullanır. `?kuyruk=1` ile iş kuyruğa alınır ve hemen
   `{"isId", "sayfaSayisi", "toplamSayfa"}` döner (202). İşler yalnız bellekte durur; servis yeniden başlarsa iş
   kaybolur (`GET` 404 döner, uygulama yeniden gönderir).
 - `GET /v1/omr/{isId}` — `{"durum": "isleniyor" | "tamam" | "hata" | "iptal", "islenenSayfa", "islenenPorte", ...}`;

@@ -33,6 +33,10 @@ ARROW = "\u21D2"
 WORDS = ["SAZ", "Meyan", "Teslim", "Karar", "1. Hâne", "2. Hâne", "3. Hâne", "4. Hâne", "Usul: Aksak", "Usul: Düyek",
          "Mülâzime", "Zeyl", "Fine", "D.C.", "Başa", "(1)", "(2)", "1.", "2.", "Nakarat", "Ağır", "Yürük", "rit.",
          "accel.", "Usul: Sofyan", "Aranağme", "Serbest", "Ad lib.", "ten.", "3", "6", "5"]
+USUL_NAMES = ["Sengîn Semâî", "Yürük Semâî", "Aksak", "Ağır Aksak", "Düyek", "Sofyan", "Curcuna", "Devr-i Hindî",
+              "Aksak Semâî", "Usûlü: Aksak", "Türk Aksağı", "Nim Sofyan"]
+RANGE_DASHES = ["—", "–", "-", " – ", " - ", " — "]
+DASH_TO_HYPHEN = str.maketrans({"—": "-", "–": "-"})
 SCALE = 4  # draw large, then shrink to the crop height
 
 
@@ -112,13 +116,23 @@ def sample(rng: random.Random) -> tuple[np.ndarray, str]:
             dotted = rng.random() < 0.08 and unit in ("U2", "U4", "U8")
             value = rng.choice([rng.randint(40, 200), rng.randint(40, 400), rng.randint(20, 999)])
             parts = [(NOTE[unit] + (DOT if dotted else ""), rng.choice(MUSIC_FONTS), int(size * rng.uniform(1.6, 2.6)))]
-            parts.append((rng.choice(["=", "= ", " = "]) + str(value), text_font, size))
-            if rng.random() < 0.25:
+            # a range (neyzen.com writes 'quarter = 72-84'), played at its middle
+            high = rng.randint(value + 4, value + max(8, value // 2)) if rng.random() < 0.3 and value < 600 else None
+            written = str(value) if high is None else str(value) + rng.choice(RANGE_DASHES) + str(high)
+            parts.append((rng.choice(["=", "= ", " = "]) + written, text_font, size))
+            if high is not None and rng.random() < 0.3:
+                # the same tempo again in another unit, in brackets: not read
+                parts.append(("(", text_font, size))
+                parts.append((NOTE[rng.choice(["U4", "U8", "U2"])] * rng.choice([1, 3]), rng.choice(MUSIC_FONTS),
+                              int(size * rng.uniform(1.6, 2.6))))
+                parts.append(("= " + str(value // 3) + "—" + str(high // 3) + ")", text_font, size))
+            elif rng.random() < 0.25:
                 parts.append((ARROW, ARROW_FONT, size))
                 parts.append((rng.choice(["1 Dk 7 Sn", "47 Sn", "3 Dk 29 Sn", "2 Dk"]), text_font, size))
-            if rng.random() < 0.1:
-                parts.insert(0, (rng.choice(["M.M.", "Tempo", "("]), text_font, size))
-            target = (unit + ("d" if dotted else "")) + " " + " ".join(str(value))
+            if rng.random() < 0.15:
+                parts.insert(0, (rng.choice(["M.M.", "Tempo", "("] + USUL_NAMES), text_font, size))
+            digits = written.replace(" ", "").translate(DASH_TO_HYPHEN)
+            target = (unit + ("d" if dotted else "")) + " " + " ".join(digits)
         else:
             # look-alikes: words, lone numbers, a note without a number
             choice = rng.random()
