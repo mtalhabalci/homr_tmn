@@ -25,6 +25,8 @@ MIN_CONFIDENCE = 0.6
 # no tempo mark, printed or synthetic, comes out wider than ~400 px at CROP_HEIGHT; a wider cluster is a line of
 # words or of notes above the staff ('1.Hane' run into the notes on a photocopy was read as a quarter = 178)
 MAX_MARK_WIDTH = 480
+QUARTERS_PER_UNIT = {"U1": 4.0, "U2": 2.0, "U4": 1.0, "U8": 0.5, "U16": 0.25}
+MIN_QUARTERS_PER_MINUTE, MAX_QUARTERS_PER_MINUTE = 20, 300
 WEIGHTS = os.environ.get("OMR_TEMPO_MODEL", os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "training", "architecture", "tempo", "tempo_okuyucu.pt"))
 
@@ -102,6 +104,14 @@ def crop(gray: np.ndarray, box: tuple[int, int, int, int], staff_height: int) ->
     return cv2.resize(piece, (width, CROP_HEIGHT), interpolation=cv2.INTER_AREA)
 
 
+def playable(unit: str, dotted: bool, value: int) -> bool:
+    """Whether the tempo, in quarters per minute, is one a score could ask for. The SymbTr marks run from 20 to 240
+    quarters a minute (an eighth = 440 is 220); a reading outside 20-300 is a misreading (a scanned page gave a
+    quarter = 728 at confidence 0.97), and no tempo is better than that one."""
+    quarters = value * QUARTERS_PER_UNIT[unit] * (1.5 if dotted else 1.0)
+    return MIN_QUARTERS_PER_MINUTE <= quarters <= MAX_QUARTERS_PER_MINUTE
+
+
 def too_wide(box: tuple[int, int, int, int], staff_height: int) -> bool:
     """Whether the cluster, cut as crop cuts it, would be wider than MAX_MARK_WIDTH before the width cap."""
     margin = int(max(staff_height / 8, 2))
@@ -167,8 +177,8 @@ def read_tempo_marks(gray: np.ndarray, staffs: list[tuple[int, int, int, int]]) 
             if not valid(seq) or confidence < MIN_CONFIDENCE:
                 continue
             value = int("".join(seq[1:]))
-            if not 20 <= value <= 1200:
+            unit, dotted = seq[0].rstrip("d"), seq[0].endswith("d")
+            if not playable(unit, dotted, value):
                 continue
-            unit = seq[0].rstrip("d")
-            found.append(TempoMark(k, box, UNIT_NAMES[unit], seq[0].endswith("d"), value, round(confidence, 3)))
+            found.append(TempoMark(k, box, UNIT_NAMES[unit], dotted, value, round(confidence, 3)))
     return found
