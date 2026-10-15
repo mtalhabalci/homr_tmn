@@ -1,7 +1,7 @@
 # Nota okuma servisi
 
-Musiki Akademisi uygulamasının çağırdığı servis: fotoğraf ya da PDF alır, MusicXML döndürür. Model tezin son
-modelidir (v20 ağırlıkları + çözümleme kuralları). Uygulamada ve servis yanıtlarında kaynak aldığımız açık kaynak
+Musiki Akademisi uygulamasının çağırdığı servis: fotoğraf ya da PDF alır, MusicXML döndürür. Model v24'tür (tezin
+son modeli v20'nin karışımı + 1.600 hakemli el yazısı porte; çözümleme kuralları açık). Tez v20'de kalır. Uygulamada ve servis yanıtlarında kaynak aldığımız açık kaynak
 projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `OMR_YAZILIM` ile verilir.
 
 ## Çalıştırma
@@ -13,8 +13,8 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
 
 | Ortam değişkeni | Varsayılan | Ne işe yarar |
 |---|---|---|
-| `OMR_MODEL` | `training/architecture/transformer/pytorch_model_1-111a84bed…pth` | ağırlık dosyası (git dışında) |
-| `OMR_MODEL_SURUM` | `v20+kurallar-2026-10-10` | yanıttaki `modelVersion` |
+| `OMR_MODEL` | `training/architecture/transformer/pytorch_model_1-819bee2…pth` (v24) | ağırlık dosyası (git dışında) |
+| `OMR_MODEL_SURUM` | `v24+kurallar-2026-10-16` | yanıttaki `modelVersion` |
 | `OMR_YAZILIM` | `Musiki Akademisi OMR` | MusicXML `<software>` |
 | `OMR_ANAHTAR` | boş | doluysa `X-Omr-Anahtar` başlığı buna eşit olmalı |
 | `OMR_PORT` | `8765` | port |

@@ -55,9 +55,10 @@ from training.architecture.transformer.tromr_arch import load_model
 from training.transformer.image_utils import ndarray_to_tensor, pad_to_3_dims
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# v24: v20's mix with 1,600 more refereed handwritten staffs (the thesis keeps v20, 111a84b)
 MODEL_PATH = os.environ.get("OMR_MODEL", os.path.join(
-    ROOT, "training", "architecture", "transformer", "pytorch_model_1-111a84bed30c8c6a373ad135e05633ccd8c63b11.pth"))
-MODEL_VERSION = os.environ.get("OMR_MODEL_SURUM", "v20+kurallar-2026-10-10")
+    ROOT, "training", "architecture", "transformer", "pytorch_model_1-819bee2ae062dff09fd97af4dfae98dd1709ceb3.pth"))
+MODEL_VERSION = os.environ.get("OMR_MODEL_SURUM", "v24+kurallar-2026-10-16")
 SOFTWARE = os.environ.get("OMR_YAZILIM", "Musiki Akademisi OMR")
 KEY = os.environ.get("OMR_ANAHTAR", "")
 MAX_BYTES = 20 * 1024 * 1024
