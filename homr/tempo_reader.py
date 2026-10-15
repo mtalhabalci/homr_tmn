@@ -22,6 +22,9 @@ MAX_CROP_WIDTH = 640
 TOKENS = ["U1", "U2", "U4", "U8", "U16", "U2d", "U4d", "U8d"] + list("0123456789")
 UNIT_NAMES = {"U1": "whole", "U2": "half", "U4": "quarter", "U8": "eighth", "U16": "16th"}
 MIN_CONFIDENCE = 0.6
+# no tempo mark, printed or synthetic, comes out wider than ~400 px at CROP_HEIGHT; a wider cluster is a line of
+# words or of notes above the staff ('1.Hane' run into the notes on a photocopy was read as a quarter = 178)
+MAX_MARK_WIDTH = 480
 WEIGHTS = os.environ.get("OMR_TEMPO_MODEL", os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "training", "architecture", "tempo", "tempo_okuyucu.pt"))
 
@@ -99,6 +102,13 @@ def crop(gray: np.ndarray, box: tuple[int, int, int, int], staff_height: int) ->
     return cv2.resize(piece, (width, CROP_HEIGHT), interpolation=cv2.INTER_AREA)
 
 
+def too_wide(box: tuple[int, int, int, int], staff_height: int) -> bool:
+    """Whether the cluster, cut as crop cuts it, would be wider than MAX_MARK_WIDTH before the width cap."""
+    margin = int(max(staff_height / 8, 2))
+    x0, y0, x1, y1 = box
+    return (x1 - x0 + 2 * margin) * CROP_HEIGHT / (y1 - y0 + 2 * margin) > MAX_MARK_WIDTH
+
+
 def to_tensor(images: list[np.ndarray]) -> torch.Tensor:
     width = max(16, (max(im.shape[1] for im in images) + 3) // 4 * 4)
     batch = np.full((len(images), 1, CROP_HEIGHT, width), 255, np.uint8)
@@ -149,7 +159,7 @@ def read_tempo_marks(gray: np.ndarray, staffs: list[tuple[int, int, int, int]]) 
     found = []
     for k, band in enumerate(bands(staffs, gray.shape[1])):
         height = staffs[k][3] - staffs[k][1]
-        boxes = clusters(gray, band, height)
+        boxes = [b for b in clusters(gray, band, height) if not too_wide(b, height)]
         if not boxes:
             continue
         readings = decode(model(to_tensor([crop(gray, b, height) for b in boxes])))
