@@ -41,7 +41,7 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
   guven, porte, sayfa, kutu}` (kutu: işaretin sayfa resmindeki yeri); `birim` MusicXML adıyla (`eighth`,
   `quarter`, …). Aralık yazılmışsa (♩ = 72–84) `aralik` `[72, 84]`, `deger` ortası (78); değilse `aralik` `null`.
   Dörtlük karşılığı dakikada 20–300 dışında kalan okuma yanlış sayılır ve gönderilmez. Aynı işaret MusicXML'de o
-  ölçünün başında `<metronome>` (aralıkta `<per-minute>72–84</per-minute>`) ve dörtlük cinsinden `<sound tempo>`
+  ölçünün başında `<metronome>` (aralıkta `<per-minute>72-84</per-minute>`) ve dörtlük cinsinden `<sound tempo>`
   olarak yazılır. İşaret okunamadıysa liste boştur; uygulama usule göre varsayılan tempoyu kullanır. `?kuyruk=1` ile iş kuyruğa alınır ve hemen
   `{"isId", "sayfaSayisi", "toplamSayfa"}` döner (202). İşler yalnız bellekte durur; servis yeniden başlarsa iş
   kaybolur (`GET` 404 döner, uygulama yeniden gönderir).

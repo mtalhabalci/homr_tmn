@@ -269,9 +269,10 @@ class Reader:
             tempos = tempo_measures(tempo_found, staff_boxes, staff_measures)
             if tempos:
                 # the measures are known only once written: write again with the tempo marks in their measures
+                # (a range with a plain hyphen: the XML file is written in the system's code page)
                 musicxml, confidence, staff_measures = write(
                     {t["olcu"]: (t["birim"], t["noktali"], t["deger"],
-                                 "{}–{}".format(*t["aralik"]) if t["aralik"] else None) for t in tempos})
+                                 "{}-{}".format(*t["aralik"]) if t["aralik"] else None) for t in tempos})
         written = {int(n) for n in re.findall(r'<measure number="(\d+)"', musicxml)}
         measures = [{"olcu": n, "guven": round(c, 3)} for n, c in sorted(confidence.items()) if n in written]
         weak = sum(1 for m in measures if m["guven"] < LOW_CONFIDENCE)
