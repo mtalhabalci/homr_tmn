@@ -2,7 +2,9 @@
 crops (datasets/tempo-el, when there) and synthetic crops.
 
     python -m training.tempo.train [--epochs 30] [--seed 0]   keeps the best val weights in OMR_TEMPO_MODEL
-                                                              (default training/architecture/tempo/tempo_okuyucu.pt)
+                                                              (default training/architecture/tempo/
+                                                              tempo_okuyucu_yeni.pt); the service's three voting
+                                                              readers are seeds 0, 1, 2, the range reader seed 2
     python -m training.tempo.train --test                     val scores of those weights
 
 Score, per val set (Mus2, handwritten, and a fixed synthetic set that holds ranges): share of the tempo crops read
@@ -20,11 +22,14 @@ import numpy as np
 import torch
 from torch import nn
 
-from homr.tempo_reader import TOKENS, WEIGHTS, TempoReader, decode, to_tensor, valid
+from homr.tempo_reader import TOKENS, TempoReader, decode, to_tensor, valid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA = os.path.join(ROOT, "datasets", "tempo-mus2")
 HANDWRITTEN = os.path.join(ROOT, "datasets", "tempo-el")
+# one weights file: the reader reads several voting ones, but each is trained alone
+WEIGHTS = os.environ.get("OMR_TEMPO_MODEL",
+                         os.path.join(ROOT, "training", "architecture", "tempo", "tempo_okuyucu_yeni.pt"))
 INDEX = {t: i + 1 for i, t in enumerate(TOKENS)}  # 0 is the CTC blank
 
 

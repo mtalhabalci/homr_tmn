@@ -6,8 +6,9 @@ CRNN reads each cluster as 'U8 1 1 2' (note value, digits; a range 'U4 7 2 - 8 4
 marks of the SymbTr Mus2 scores (whose .mu2 files hold every tempo) and on synthetic marks in printed and
 handwriting-like fonts (training/tempo/).
 
-read_tempo_marks(gray_page, staff_boxes) -> [TempoMark]; the weights come from OMR_TEMPO_MODEL (default
-training/architecture/tempo/tempo_okuyucu.pt); without them no tempo is read.
+read_tempo_marks(gray_page, staff_boxes) -> [TempoMark]; the weights come from OMR_TEMPO_MODEL (default three
+readers that vote, training/architecture/tempo/tempo_okuyucu_1.pt|_2.pt|_3.pt) and OMR_TEMPO_ARALIK_MODEL (the
+range reader, tempo_okuyucu_aralik.pt); without them no tempo is read.
 """
 import os
 from dataclasses import dataclass
@@ -28,7 +29,12 @@ MAX_MARK_WIDTH = 480
 QUARTERS_PER_UNIT = {"U1": 4.0, "U2": 2.0, "U4": 1.0, "U8": 0.5, "U16": 0.25}
 MIN_QUARTERS_PER_MINUTE, MAX_QUARTERS_PER_MINUTE = 20, 300
 _ARCH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "training", "architecture", "tempo")
-WEIGHTS = os.environ.get("OMR_TEMPO_MODEL", os.path.join(_ARCH, "tempo_okuyucu.pt"))
+# several weights joined by '|' read together and vote: a reading stands when most of them read it. Readers trained
+# with different seeds differ much on what little data shows (handwriting, ranges), and one reader's odd reading
+# (a quarter = 72 made of beamed notes) is outvoted. (Averaging their frame probabilities read nothing: each
+# reader places a digit's CTC spike on a slightly different frame.)
+WEIGHTS = os.environ.get("OMR_TEMPO_MODEL",
+                         "|".join(os.path.join(_ARCH, f"tempo_okuyucu_{k}.pt") for k in (1, 2, 3)))
 # a second reader trained with a different seed reads ranges ('quarter = 72-84') more surely; where it reads a range
 # its reading is taken (the main reader read 72-84 as 12-84), every other reading is the main reader's
 RANGE_WEIGHTS = os.environ.get("OMR_TEMPO_ARALIK_MODEL", os.path.join(_ARCH, "tempo_okuyucu_aralik.pt"))
@@ -41,7 +47,10 @@ class TempoReader(nn.Module):
         def block(cin: int, cout: int, pool: int | tuple[int, int]) -> list[nn.Module]:
             return [nn.Conv2d(cin, cout, 3, padding=1), nn.BatchNorm2d(cout), nn.ReLU(inplace=True), nn.MaxPool2d(pool)]
 
-        self.cnn = nn.Sequential(*block(1, 32, 2), *block(32, 64, 2), *block(64, 128, (2, 1)), *block(128, 192, (2, 1)),
+        # one frame per 2 px of width: at 4 px two equal digits of a small handwritten '200' fell into one frame
+        # and CTC read them as one ('20')
+        self.cnn = nn.Sequential(*block(1, 32, 2), *block(32, 64, (2, 1)), *block(64, 128, (2, 1)),
+                                 *block(128, 192, (2, 1)),
                                  nn.Conv2d(192, 256, (3, 1)), nn.BatchNorm2d(256), nn.ReLU(inplace=True))
         self.rnn = nn.LSTM(256, 128, num_layers=2, bidirectional=True, batch_first=True, dropout=0.2)
         self.out = nn.Linear(256, len(TOKENS) + 1)
@@ -177,6 +186,31 @@ def _load(path: str) -> TempoReader | None:
     return _models.get(path)
 
 
+def _reader(spec: str):  # noqa: ANN202
+    """The reader for one or more weights ('a.pt|b.pt|c.pt'): crops -> [(tokens, confidence)]. With several, a
+    crop's reading is the one most of them give (as a mark, at MIN_CONFIDENCE or more; confidence their mean),
+    or nothing."""
+    models = [m for m in (_load(path) for path in spec.split("|")) if m is not None]
+    if not models:
+        return None
+    if len(models) == 1:
+        return lambda x: decode(models[0](x))
+
+    def vote(x: torch.Tensor) -> list[tuple[list[str], float]]:
+        out = []
+        for readings in zip(*(decode(m(x)) for m in models), strict=True):
+            marks = [(tuple(seq), c) for seq, c in readings if valid(seq) and c >= MIN_CONFIDENCE]
+            counts: dict[tuple, list[float]] = {}
+            for seq, c in marks:
+                counts.setdefault(seq, []).append(c)
+            best = max(counts.items(), key=lambda kv: len(kv[1]), default=None)
+            out.append((list(best[0]), float(np.mean(best[1]))) if best and 2 * len(best[1]) > len(models)
+                       else ([], 0.0))
+        return out
+
+    return vote
+
+
 def _is_range(seq: list[str], confidence: float) -> bool:
     found = numbers(seq)
     return found is not None and found[1] is not None and confidence >= MIN_CONFIDENCE
@@ -185,8 +219,8 @@ def _is_range(seq: list[str], confidence: float) -> bool:
 @torch.no_grad()
 def read_tempo_marks(gray: np.ndarray, staffs: list[tuple[int, int, int, int]]) -> list[TempoMark]:
     """The tempo marks above the given staffs (boxes of their lines, top to bottom, on this gray page)."""
-    model = _load(WEIGHTS)
-    range_model = _load(RANGE_WEIGHTS) if RANGE_WEIGHTS != WEIGHTS else None
+    model = _reader(WEIGHTS)
+    range_model = _reader(RANGE_WEIGHTS) if RANGE_WEIGHTS != WEIGHTS else None
     if model is None or not staffs:
         return []
     found = []
@@ -196,10 +230,9 @@ def read_tempo_marks(gray: np.ndarray, staffs: list[tuple[int, int, int, int]]) 
         if not boxes:
             continue
         crops = to_tensor([crop(gray, b, height) for b in boxes])
-        readings = decode(model(crops))
+        readings = model(crops)
         if range_model is not None:
-            readings = [s if _is_range(*s) else r
-                        for r, s in zip(readings, decode(range_model(crops)), strict=True)]
+            readings = [s if _is_range(*s) else r for r, s in zip(readings, range_model(crops), strict=True)]
         for box, (seq, confidence) in zip(boxes, readings, strict=True):
             if not valid(seq) or confidence < MIN_CONFIDENCE:
                 continue

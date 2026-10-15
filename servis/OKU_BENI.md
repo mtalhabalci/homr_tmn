@@ -19,7 +19,7 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
 | `OMR_ANAHTAR` | boş | doluysa `X-Omr-Anahtar` başlığı buna eşit olmalı |
 | `OMR_PORT` | `8765` | port |
 | `OMR_GPU_SEGMENTASYON` | kapalı | `1`: porte bulma da ekran kartında |
-| `OMR_TEMPO_MODEL` | `training/architecture/tempo/tempo_okuyucu.pt` | tempo okuyucunun ağırlığı (git dışında); yoksa tempo okunmaz |
+| `OMR_TEMPO_MODEL` | `training/architecture/tempo/tempo_okuyucu_1.pt\|_2.pt\|_3.pt` | tempo okuyucuların ağırlıkları (git dışında), `\|` ile ayrılmış; birden çoksa oylar, çoğunluğun okuduğu geçer; hiçbiri yoksa tempo okunmaz |
 | `OMR_TEMPO_ARALIK_MODEL` | `training/architecture/tempo/tempo_okuyucu_aralik.pt` | aralıkları (♩ = 72–84) daha iyi okuyan ikinci okuyucu; yalnız aralık okuduğu yerde kullanılır, yoksa atlanır |
 
 ## Uç noktalar
