@@ -99,6 +99,116 @@
  ],
  "porteSayisi": 8,
  "sayfaSayisi": 1,
- "sureMs": 7350,
+ "toplamSayfa": 1,
+ "sayfalar": [
+  1
+ ],
+ "porteler": [
+  {
+   "porte": 1,
+   "sayfa": 1,
+   "kutu": [
+    330,
+    587,
+    1740,
+    647
+   ],
+   "olcuBas": 1,
+   "olcuSon": 3
+  },
+  {
+   "porte": 2,
+   "sayfa": 1,
+   "kutu": [
+    270,
+    752,
+    1740,
+    814
+   ],
+   "olcuBas": 4,
+   "olcuSon": 6
+  },
+  {
+   "porte": 3,
+   "sayfa": 1,
+   "kutu": [
+    270,
+    923,
+    1740,
+    986
+   ],
+   "olcuBas": 7,
+   "olcuSon": 9
+  },
+  {
+   "porte": 4,
+   "sayfa": 1,
+   "kutu": [
+    270,
+    1096,
+    1744,
+    1161
+   ],
+   "olcuBas": 10,
+   "olcuSon": 12
+  },
+  {
+   "porte": 5,
+   "sayfa": 1,
+   "kutu": [
+    270,
+    1266,
+    1744,
+    1332
+   ],
+   "olcuBas": 13,
+   "olcuSon": 15
+  },
+  {
+   "porte": 6,
+   "sayfa": 1,
+   "kutu": [
+    270,
+    1441,
+    1750,
+    1505
+   ],
+   "olcuBas": 16,
+   "olcuSon": 18
+  },
+  {
+   "porte": 7,
+   "sayfa": 1,
+   "kutu": [
+    270,
+    1656,
+    1750,
+    1721
+   ],
+   "olcuBas": 19,
+   "olcuSon": 21
+  },
+  {
+   "porte": 8,
+   "sayfa": 1,
+   "kutu": [
+    270,
+    1829,
+    1740,
+    1894
+   ],
+   "olcuBas": 22,
+   "olcuSon": 23
+  }
+ ],
+ "sayfaResimleri": [
+  {
+   "sayfa": 1,
+   "genislik": 1920,
+   "yukseklik": 2716,
+   "dpi": 232.26
+  }
+ ],
+ "sureMs": 9599,
  "kaynak": "datasets/erdincbal-real/exam/pdf/hayir/EB01816__acemasiran--sarki--aksak--oldu_gonul--dede_efendi.pdf"
 }

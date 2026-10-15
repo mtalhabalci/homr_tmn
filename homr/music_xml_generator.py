@@ -102,6 +102,7 @@ class XmlGeneratorArguments:
         tempo: int | None = None,
         software: str = "homr",
         measure_confidence: dict[int, float] | None = None,
+        staff_measures: list[tuple[int, int]] | None = None,
     ):
         self.large_page = large_page
         self.metronome = metronome
@@ -111,6 +112,9 @@ class XmlGeneratorArguments:
         # when a dict is given, filled with the lowest symbol confidence of each written measure, keyed by
         # the measure's number in the file
         self.measure_confidence = measure_confidence
+        # when a list is given, filled with (first, last) measure number of every staff, one entry per newline;
+        # a measure that runs on from one staff to the next belongs to both
+        self.staff_measures = staff_measures
 
 
 def build_identification(args: XmlGeneratorArguments) -> mxl.XMLIdentification:
@@ -263,6 +267,7 @@ def build_measures(
         if direction:
             current_measure.add_child(direction)
     attributes: mxl.XMLAttributes | None = first_attributes
+    staff_first = 1
     for group_no, group in enumerate(groups):
         symbol = group.symbols[0]
         rhythm = symbol.rhythm
@@ -282,6 +287,10 @@ def build_measures(
                 add_notes(group)
             continue
         if rhythm == "newline":
+            if args.staff_measures is not None and is_first_part:
+                last = measure_number if _has_music(current_measure) else measure_number - 1
+                args.staff_measures.append((staff_first, last))
+                staff_first = measure_number
             is_last_measure = group_no == len(groups) - 1
             if not is_last_measure:
                 current_measure.add_child(mxl.XMLPrint(new_system="yes"))

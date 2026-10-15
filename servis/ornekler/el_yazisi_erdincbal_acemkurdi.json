@@ -136,6 +136,116 @@
  ],
  "porteSayisi": 8,
  "sayfaSayisi": 1,
- "sureMs": 7361,
+ "toplamSayfa": 1,
+ "sayfalar": [
+  1
+ ],
+ "porteler": [
+  {
+   "porte": 1,
+   "sayfa": 1,
+   "kutu": [
+    120,
+    314,
+    1820,
+    385
+   ],
+   "olcuBas": 1,
+   "olcuSon": 5
+  },
+  {
+   "porte": 2,
+   "sayfa": 1,
+   "kutu": [
+    120,
+    499,
+    1820,
+    568
+   ],
+   "olcuBas": 6,
+   "olcuSon": 10
+  },
+  {
+   "porte": 3,
+   "sayfa": 1,
+   "kutu": [
+    130,
+    690,
+    1830,
+    763
+   ],
+   "olcuBas": 11,
+   "olcuSon": 13
+  },
+  {
+   "porte": 4,
+   "sayfa": 1,
+   "kutu": [
+    130,
+    876,
+    1824,
+    953
+   ],
+   "olcuBas": 14,
+   "olcuSon": 16
+  },
+  {
+   "porte": 5,
+   "sayfa": 1,
+   "kutu": [
+    130,
+    1065,
+    1830,
+    1142
+   ],
+   "olcuBas": 17,
+   "olcuSon": 21
+  },
+  {
+   "porte": 6,
+   "sayfa": 1,
+   "kutu": [
+    130,
+    1249,
+    1830,
+    1333
+   ],
+   "olcuBas": 22,
+   "olcuSon": 24
+  },
+  {
+   "porte": 7,
+   "sayfa": 1,
+   "kutu": [
+    130,
+    1439,
+    1830,
+    1521
+   ],
+   "olcuBas": 25,
+   "olcuSon": 29
+  },
+  {
+   "porte": 8,
+   "sayfa": 1,
+   "kutu": [
+    130,
+    1628,
+    1830,
+    1705
+   ],
+   "olcuBas": 30,
+   "olcuSon": 32
+  }
+ ],
+ "sayfaResimleri": [
+  {
+   "sayfa": 1,
+   "genislik": 1920,
+   "yukseklik": 2248,
+   "dpi": 225.62
+  }
+ ],
+ "sureMs": 9468,
  "kaynak": "datasets/erdincbal-real/exam/pdf/evet/EB03676__acemkurdi--sarki--duyek--baharla_hazan--avni_anil.pdf"
 }

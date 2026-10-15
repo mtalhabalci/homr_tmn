@@ -7,6 +7,8 @@
                             only: 1-based pages such as "1-3,5"; a bad range is 400 gecersiz_sayfalar)
                             ?kuyruk=1 queues the job and answers {"isId", "sayfaSayisi", "toplamSayfa"} at once;
                             jobs live in memory only, so a restart loses them (GET answers 404, the app sends again)
+                            Besides the MusicXML the answer carries "porteler" (per staff: page, box on the page image,
+                            first and last measure) and "sayfaResimleri" (per page: image size and DPI)
     GET  /v1/omr/{isId}     {"durum": "isleniyor" | "tamam" | "hata" | "iptal", "islenenSayfa", "islenenPorte", ...}
     DELETE /v1/omr/{isId}   a running job stops before its next staff and stays as durum "iptal" (202); a finished
                             one is removed (200)
@@ -41,6 +43,7 @@ from fastapi import FastAPI, File, Form, Header, UploadFile
 from fastapi.responses import JSONResponse
 
 from homr import main as reader_main
+from homr.autocrop import autocrop_box
 from homr.main import ProcessingConfig, detect_staffs_in_image
 from homr.music_xml_generator import XmlGeneratorArguments, generate_xml
 from homr.staff_parsing import prepare_staff_image
@@ -144,15 +147,16 @@ class Reader:
         self.processing = ProcessingConfig(False, False, False, False, -1,
                                            os.environ.get("OMR_GPU_SEGMENTASYON") == "1")
 
-    def _page_image(self, path: str, scratch: str, page_no: int) -> str:
+    def _page_image(self, path: str, scratch: str, page_no: int) -> tuple[str, float | None]:
+        """The page as an image file, and its resolution in DPI (a PDF page is rendered; a photo has none)."""
         if not path.endswith(".pdf"):
-            return path
+            return path, None
         with fitz.open(path) as document:
             page = document[page_no - 1]
             zoom = PAGE_WIDTH / page.rect.width
             image = os.path.join(scratch, f"sayfa-{page_no}.png")
             page.get_pixmap(matrix=fitz.Matrix(zoom, zoom)).save(image)
-        return image
+        return image, round(72 * zoom, 2)
 
     def read(self, path: str, pages: list[int] | None = None, progress=None,
              cancel: threading.Event | None = None) -> dict:
@@ -162,13 +166,16 @@ class Reader:
         warnings: list[str] = []
         voice: list[EncodedSymbol] = []
         staffs = 0
+        page_info: list[dict] = []
+        staff_boxes: list[tuple[int, list[int]]] = []
         total = page_count(path)
         pages = pages or list(range(1, total + 1))
         with self.lock, tempfile.TemporaryDirectory() as scratch:
             for done, page_no in enumerate(pages):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled
-                image = self._page_image(path, scratch, page_no)
+                image, dpi = self._page_image(path, scratch, page_no)
+                page_pixels = cv2.imread(image)
                 where = f"{page_no}. sayfa" if total > 1 else "Sayfa"
                 try:
                     multi_staffs, preprocessed, debug, _ = detect_staffs_in_image(image, self.processing)
@@ -176,6 +183,11 @@ class Reader:
                     warnings.append(f"{where}: porte bulunamadı.")
                     continue
                 regions = StaffRegions(multi_staffs)
+                # staffs are found on the page cropped to the paper and scaled; their boxes go back to the image
+                height, width = page_pixels.shape[:2]
+                box = autocrop_box(page_pixels) or (0, 0, width, height)
+                scale_x, scale_y = box[2] / preprocessed.shape[1], box[3] / preprocessed.shape[0]
+                page_info.append({"sayfa": page_no, "genislik": width, "yukseklik": height, "dpi": dpi})
                 found = sorted((s for multi in multi_staffs for s in multi.staffs), key=lambda s: s.min_y)
                 for number, staff in enumerate(found):
                     if cancel is not None and cancel.is_set():
@@ -190,6 +202,10 @@ class Reader:
                     with torch.no_grad():
                         symbols = self.model.generate(tensor.unsqueeze(0))
                     voice += [s for s in symbols if not s.is_control_symbol()] + [EncodedSymbol("newline")]
+                    staff_boxes.append((page_no, [round(box[0] + staff.min_x * scale_x),
+                                                  round(box[1] + staff.min_y * scale_y),
+                                                  round(box[0] + staff.max_x * scale_x),
+                                                  round(box[1] + staff.max_y * scale_y)]))
                     staffs += 1
                 if progress is not None:
                     progress(done + 1, staffs)
@@ -198,7 +214,9 @@ class Reader:
                                 "Görüntüde okunabilir porte bulunamadı. Sayfanın tamamı, düz ve net çekilmiş "
                                 "olmalı.")
             confidence: dict[int, float] = {}
-            args = XmlGeneratorArguments(software=SOFTWARE, measure_confidence=confidence)
+            staff_measures: list[tuple[int, int]] = []
+            args = XmlGeneratorArguments(software=SOFTWARE, measure_confidence=confidence,
+                                         staff_measures=staff_measures)
             out = os.path.join(scratch, "sonuc.musicxml")
             generate_xml(args, [voice], "").write(out)
             with open(out, encoding="utf-8") as handle:
@@ -211,8 +229,14 @@ class Reader:
         off = measures_off_meter(musicxml)
         if off:
             warnings.append(f"Ölçü {', '.join(map(str, off))}: süreler ölçü işaretini tutmuyor; kontrol edilmeli.")
+        staff_list = []
+        for number, ((page_no, box), (first, last)) in enumerate(zip(staff_boxes, staff_measures, strict=False), 1):
+            measured = first <= last
+            staff_list.append({"porte": number, "sayfa": page_no, "kutu": box,
+                               "olcuBas": first if measured else None, "olcuSon": last if measured else None})
         return {"musicxml": musicxml, "modelVersion": MODEL_VERSION, "olcuGuven": measures, "uyarilar": warnings,
                 "porteSayisi": staffs, "sayfaSayisi": len(pages), "toplamSayfa": total, "sayfalar": pages,
+                "porteler": staff_list, "sayfaResimleri": page_info,
                 "sureMs": round((time.perf_counter() - start) * 1000)}
 
 

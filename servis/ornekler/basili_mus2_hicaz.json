@@ -93,6 +93,219 @@
  "uyarilar": [],
  "porteSayisi": 16,
  "sayfaSayisi": 2,
- "sureMs": 15216,
+ "toplamSayfa": 2,
+ "sayfalar": [
+  1,
+  2
+ ],
+ "porteler": [
+  {
+   "porte": 1,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    373,
+    1870,
+    443
+   ],
+   "olcuBas": 1,
+   "olcuSon": 1
+  },
+  {
+   "porte": 2,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    630,
+    1870,
+    705
+   ],
+   "olcuBas": 2,
+   "olcuSon": 2
+  },
+  {
+   "porte": 3,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    896,
+    1870,
+    969
+   ],
+   "olcuBas": 3,
+   "olcuSon": 3
+  },
+  {
+   "porte": 4,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    1156,
+    1880,
+    1226
+   ],
+   "olcuBas": 4,
+   "olcuSon": 4
+  },
+  {
+   "porte": 5,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    1415,
+    1870,
+    1492
+   ],
+   "olcuBas": 5,
+   "olcuSon": 5
+  },
+  {
+   "porte": 6,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    1678,
+    1870,
+    1748
+   ],
+   "olcuBas": 6,
+   "olcuSon": 7
+  },
+  {
+   "porte": 7,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    1941,
+    1870,
+    2011
+   ],
+   "olcuBas": 8,
+   "olcuSon": 9
+  },
+  {
+   "porte": 8,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    2200,
+    1873,
+    2272
+   ],
+   "olcuBas": 10,
+   "olcuSon": 11
+  },
+  {
+   "porte": 9,
+   "sayfa": 1,
+   "kutu": [
+    40,
+    2462,
+    1870,
+    2533
+   ],
+   "olcuBas": 12,
+   "olcuSon": 12
+  },
+  {
+   "porte": 10,
+   "sayfa": 2,
+   "kutu": [
+    40,
+    237,
+    1880,
+    310
+   ],
+   "olcuBas": 13,
+   "olcuSon": 13
+  },
+  {
+   "porte": 11,
+   "sayfa": 2,
+   "kutu": [
+    40,
+    498,
+    1870,
+    568
+   ],
+   "olcuBas": 14,
+   "olcuSon": 14
+  },
+  {
+   "porte": 12,
+   "sayfa": 2,
+   "kutu": [
+    40,
+    759,
+    1870,
+    830
+   ],
+   "olcuBas": 15,
+   "olcuSon": 16
+  },
+  {
+   "porte": 13,
+   "sayfa": 2,
+   "kutu": [
+    40,
+    1021,
+    1870,
+    1094
+   ],
+   "olcuBas": 17,
+   "olcuSon": 18
+  },
+  {
+   "porte": 14,
+   "sayfa": 2,
+   "kutu": [
+    40,
+    1278,
+    1870,
+    1355
+   ],
+   "olcuBas": 19,
+   "olcuSon": 20
+  },
+  {
+   "porte": 15,
+   "sayfa": 2,
+   "kutu": [
+    40,
+    1543,
+    1870,
+    1618
+   ],
+   "olcuBas": 21,
+   "olcuSon": 21
+  },
+  {
+   "porte": 16,
+   "sayfa": 2,
+   "kutu": [
+    40,
+    1805,
+    1870,
+    1876
+   ],
+   "olcuBas": 22,
+   "olcuSon": 22
+  }
+ ],
+ "sayfaResimleri": [
+  {
+   "sayfa": 1,
+   "genislik": 1920,
+   "yukseklik": 2717,
+   "dpi": 232.25
+  },
+  {
+   "sayfa": 2,
+   "genislik": 1920,
+   "yukseklik": 2717,
+   "dpi": 232.25
+  }
+ ],
+ "sureMs": 19750,
  "kaynak": "datasets/SymbTr-2.0.0/pdf/hicaz--sarki--agiraksak--firkatin_aldi--bimen_sen.pdf"
 }

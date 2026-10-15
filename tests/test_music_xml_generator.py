@@ -345,6 +345,26 @@ barline . . . .""".splitlines()
         self.assertEqual(sounds, [("2", {"segno": "segno1"}), ("3", {"dalsegno": "segno1"}),
                                   ("4", {"segno": "segno2"}), ("4", {"dacapo": "yes"})])
 
+    def test_staff_measures_give_each_staffs_measure_range(self) -> None:
+        """Each staff's first and last measure; a measure that runs on past the line end belongs to both staffs."""
+        tokens = read_token_lines(
+            """clef_G2 . . . upper
+timeSignature_2/4 . . . .
+note_2 C5 _ _ upper
+barline . . . .
+note_4 D5 _ _ upper
+newline . . . .
+clef_G2 . . . upper
+note_4 E5 _ _ upper
+barline . . . .
+note_2 F5 _ _ upper
+barline . . . .
+newline . . . .""".splitlines()
+        )
+        ranges: list[tuple[int, int]] = []
+        generate_xml(XmlGeneratorArguments(staff_measures=ranges), [tokens], "")
+        self.assertEqual(ranges, [(1, 2), (2, 3)])
+
     def test_first_ending_stops_at_its_backward_repeat(self) -> None:
         """When the end of a first ending's bracket was not read, the ending still stops at the backward repeat."""
         tokens = read_token_lines(
