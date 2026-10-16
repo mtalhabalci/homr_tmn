@@ -288,6 +288,7 @@ class Reader:
             staff_list.append({"porte": number, "sayfa": page_no, "kutu": box,
                                "olcuBas": first if measured else None, "olcuSon": last if measured else None})
         return {"musicxml": musicxml, "modelVersion": MODEL_VERSION, "olcuGuven": measures, "uyarilar": warnings,
+                "sureyiTutmayanOlculer": off,
                 "porteSayisi": staffs, "sayfaSayisi": len(pages), "toplamSayfa": total, "sayfalar": pages,
                 "porteler": staff_list, "sayfaResimleri": page_info, "tempolar": tempos,
                 "sureMs": round((time.perf_counter() - start) * 1000)}

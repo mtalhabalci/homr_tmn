@@ -59,8 +59,9 @@ projenin adı geçmez (Talha'nın kuralı); MusicXML'deki `<software>` alanı `O
 Her satırın güveni, modelin seçtiği ritim, perde ve arıza olasılıklarının en küçüğüdür; ölçü işareti, ölçü
 çizgisi, tekrar ve volta satırlarında yalnız işaretin kendisi sayılır. Ölçünün güveni içindeki satırların en
 düşüğüdür. 0,5'in altı `uyarilar`'a yazılır. Örnek: basılı Mus2 ve dizgi sayfalarda düşük güvenli ölçü yok, el
-yazısı bir sayfada 32 ölçünün 5'i. Süreleri ölçü işaretini tutmayan ölçüler de numaralarıyla `uyarilar`'a yazılır
-(ilk ve son ölçü yalnız uzunsa; kısa olmaları ön vuruş olabilir).
+yazısı bir sayfada 32 ölçünün 5'i. Süreleri ölçü işaretini tutmayan ölçüler de numaralarıyla `uyarilar`'a tek
+satırda yazılır ("Ölçü 6, 7: süreler ölçü işaretini tutmuyor; kontrol edilmeli."; ilk ve son ölçü yalnız
+uzunsa, kısa olmaları ön vuruş olabilir); aynı numaralar `sureyiTutmayanOlculer` listesinde de gelir.
 
 ## MusicXML yapısı
 
